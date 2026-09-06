@@ -524,6 +524,18 @@ export default class Device extends AABBDevice {
     // by re-deriving the on-wire checksum via AABBDevice.send(). These commands are GATED by remote start (the
     // remote_start entity, rec[38] 0x10): with it off the appliance just beeps and ignores them. A running cycle
     // auto-enables it unless disabled from the panel; an idle machine leaves it off unless armed.
+    //
+    // REMOTE-START SCOPE (a deliberate decision — documented for whoever extends this):
+    // `start_course` sends the DEFAULT blob for the picked course — that course at its own defaults, start-now.
+    // That is the whole feature, on purpose. A full remote cycle-builder (override temp/soil/spin/rinse/options at
+    // start time) is intentionally NOT built, for two reasons:
+    //   1. The start is stateless, so the set of valid commands is combinatorial (course x every option x delay =
+    //      hundreds) — a wall of MQTT selects assembling one is the wrong tool.
+    //   2. Each course CONSTRAINS which options are legal: Turbo is course-locked (the machine refuses to set it,
+    //      proven with a control packet), and some temp/spin levels are disallowed per course. A correct builder
+    //      must encode every course's option-availability rules — real work for marginal remote value.
+    // To customize a cycle: use the machine's panel, or extend this code. The full config/start grammar and the
+    // field ids are on buildConfigStart() below; the parked builder-wip draft has HA entity scaffolding to start from.
     start() {
         // connection init — makes the appliance begin streaming status frames (captured toDevice handshake)
         this.send(Buffer.from('f0ed1121010000001800', 'hex'))
