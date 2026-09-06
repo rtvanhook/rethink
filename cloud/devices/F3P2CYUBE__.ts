@@ -458,8 +458,9 @@ export default class Device extends AABBDevice {
     // ---- write path (control) ----
     // Command opcode for this model is F0 E5 (the sibling's F0 24/2A does NOT apply here). Each command below
     // is the EXACT inner captured from the real LG cloud driving this machine through rethink's bridge, verified
-    // by re-deriving the on-wire checksum via AABBDevice.send(). Remote control requires "Remote Start" armed on
-    // the appliance (it pre-locks the door).
+    // by re-deriving the on-wire checksum via AABBDevice.send(). These commands are GATED by remote start (the
+    // remote_start entity, rec[38] 0x10): with it off the appliance just beeps and ignores them. A running cycle
+    // auto-enables it unless disabled from the panel; an idle machine leaves it off unless armed.
     start() {
         // connection init — makes the appliance begin streaming status frames (captured toDevice handshake)
         this.send(Buffer.from('f0ed1121010000001800', 'hex'))
@@ -467,7 +468,7 @@ export default class Device extends AABBDevice {
 
     setProperty(prop: string, value: string) {
         // All commands below are EXACT cloud->device packets captured via bridge mode while driving the LG app,
-        // each checksum-verified against AABBDevice.send(). Remote control needs "Remote Start" armed on the unit.
+        // each checksum-verified against AABBDevice.send(). Gated by remote start (see above): beep-and-ignore if off.
         if (prop === 'start')
             this.send(Buffer.from('f0e5000201ff010301', 'hex')) // begin the selected cycle
         else if (prop === 'pause') this.send(Buffer.from('f0e5000201ff010302', 'hex'))
