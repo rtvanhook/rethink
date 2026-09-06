@@ -386,18 +386,17 @@ describe('F3P2CYUBE__', () => {
         assert.equal(p.extra_rinse_count, 3)
     })
 
-    test('write: the power_off button emits the exact captured WMOff packet', () => {
+    test('write: the power_off dropdown emits the exact captured WMOff packet', () => {
         const { thinq, dev } = makeDevice()
         thinq.resetRecorder()
-        dev.setProperty('power_off', '')
+        dev.setProperty('power_off', 'Power Off')
         // exact cloud->device packet captured via bridge mode when Power Off was pressed in the LG app
         assert.equal(hex(thinq.outbox[0]).toLowerCase(), 'aa0df0e5000201ff010200c4bb')
     })
 
-    test('write: start / pause / resume emit their exact captured packets', () => {
+    test('write: pause / resume emit their exact captured packets', () => {
         const { thinq, dev } = makeDevice()
         for (const [prop, want] of [
-            ['start', 'aa0df0e5000201ff010301c6bb'],
             ['pause', 'aa0df0e5000201ff010302c1bb'],
             ['resume', 'aa0ff0e5000201ff024400030389bb'],
         ] as const) {

@@ -394,14 +394,6 @@ export default class Device extends AABBDevice {
                         icon: 'mdi:brain',
                         entity_category: 'diagnostic',
                     },
-                    start: {
-                        platform: 'button',
-                        unique_id: '$deviceid-start',
-                        command_topic: '$this/start/set',
-                        payload_press: '',
-                        name: 'Start',
-                        icon: 'mdi:play-circle-outline',
-                    },
                     pause: {
                         platform: 'button',
                         unique_id: '$deviceid-pause',
@@ -419,15 +411,16 @@ export default class Device extends AABBDevice {
                         icon: 'mdi:play-pause',
                     },
                     power_off: {
-                        platform: 'button',
+                        platform: 'select',
                         unique_id: '$deviceid-power_off',
                         command_topic: '$this/power_off/set',
-                        payload_press: '',
+                        state_topic: '$this/power_off',
+                        options: ['unknown', 'Power Off'],
                         name: 'Power Off',
                         icon: 'mdi:power',
-                        // The app guards this with "Are you sure?"; in HA that confirmation is a dashboard-card
-                        // property (tap_action: confirmation:), not an entity one — so this is a plain button and
-                        // the guard is added on the Lovelace card. See setProperty for the stranding caveat.
+                        // A select, not a button, so powering off is a deliberate two-step (open the dropdown, pick
+                        // 'Power Off') rather than a one-tap — the entity-level guard HA can actually offer, since it
+                        // has no button confirm. It resets to 'unknown' after firing. See setProperty for the caveat.
                     },
                     start_course: {
                         platform: 'select',
@@ -539,19 +532,21 @@ export default class Device extends AABBDevice {
     setProperty(prop: string, value: string) {
         // All commands below are EXACT cloud->device packets captured via bridge mode while driving the LG app,
         // each checksum-verified against AABBDevice.send(). Gated by remote start (see above): beep-and-ignore if off.
-        if (prop === 'start')
-            this.send(Buffer.from('f0e5000201ff010301', 'hex')) // begin the selected cycle
-        else if (prop === 'pause') this.send(Buffer.from('f0e5000201ff010302', 'hex'))
+        // No bare 'start' command: the app never sends a stateful "begin the dialed cycle" — starting is the
+        // stateless config/start blob (start_course). Only pause / resume / power_off / start_course are exposed.
+        if (prop === 'pause') this.send(Buffer.from('f0e5000201ff010302', 'hex'))
         else if (prop === 'resume')
             this.send(Buffer.from('f0e5000201ff0244000303', 'hex')) // resume-from-pause: a DISTINCT, longer packet than start
         else if (prop === 'power_off') {
-            // WMOff — the app's Power Off button. The app guards it with "Are you sure?"; in HA that confirmation is
-            // a dashboard-card property (tap_action: confirmation:), not an entity one, so the guard is added on the
-            // Lovelace card. (LG's own HA integration ships an UNGUARDED power control that will strand the machine
-            // on a fat-finger — this is the same command, done with the guard restored where HA puts it.)
-            // Caveat, documented not withheld: remote power-off drops the Wi-Fi module with no reliable remote wake,
-            // stranding the connection until someone walks to the machine — exactly as the app warns.
-            this.send(Buffer.from('f0e5000201ff010200', 'hex'))
+            // WMOff — the app's Power Off, exposed as a select: picking 'Power Off' fires, then it snaps back to
+            // 'unknown'. The dropdown IS the guard (a deliberate two-step); HA has no entity-level "Are you sure?"
+            // for a button, and LG's own integration ships an unguarded power control that strands the machine on a
+            // fat-finger. Caveat, documented not withheld: remote power-off drops the Wi-Fi module with no reliable
+            // remote wake, stranding the connection until someone walks to the machine — exactly as the app warns.
+            if (value === 'Power Off') {
+                this.send(Buffer.from('f0e5000201ff010200', 'hex'))
+                this.publishProperty('power_off', 'unknown') // reset the dropdown so it can't sit armed and is re-fireable
+            }
         } else if (prop === 'start_course') {
             // config/start: start the picked course at its defaults (course-only, per scope). Like all writes, it
             // needs "Remote Start" armed on the machine or the appliance beeps and ignores it.
