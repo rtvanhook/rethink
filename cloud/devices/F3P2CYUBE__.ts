@@ -429,7 +429,7 @@ export default class Device extends AABBDevice {
         this.publishProperty('power', isOff ? 'OFF' : 'ON')
         this.publishProperty('status', STATE[state] ?? `Unknown (${state})`)
         this.publishProperty('previous_status', STATE[rec[PRESTATE_OFFSET]] ?? `Unknown (${rec[PRESTATE_OFFSET]})`)
-        this.publishProperty('course_code', rec[COURSE_OFFSET])
+        this.publishProperty('course_code', '0x' + rec[COURSE_OFFSET].toString(16).padStart(2, '0'))
         this.publishProperty('course', COURSE[rec[COURSE_OFFSET]] ?? 'unknown')
         // Zeroed while Off: the machine keeps stale settings bytes after power-off.
         const reserve = (rec[RESERVE_HI_OFFSET] << 8) | rec[RESERVE_LO_OFFSET]

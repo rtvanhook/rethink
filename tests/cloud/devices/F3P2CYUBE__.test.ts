@@ -195,7 +195,7 @@ describe('F3P2CYUBE__', () => {
         const p = ha.devices[DEVICE_ID].properties
         assert.equal(p.power, 'ON')
         assert.equal(p.status, 'Initial')
-        assert.equal(p.course_code, 0x2e)
+        assert.equal(p.course_code, '0x2e')
         assert.equal(p.soil, 'Normal')
         assert.equal(p.temp, 'Warm')
         assert.equal(p.extra_rinse, 0)
@@ -341,7 +341,7 @@ describe('F3P2CYUBE__', () => {
         for (const [code, name] of Object.entries(expect)) {
             thinq.emit('data', mk(Number(code)))
             assert.equal(p.course, name, `course 0x${Number(code).toString(16)}`)
-            assert.equal(p.course_code, Number(code))
+            assert.equal(p.course_code, '0x' + Number(code).toString(16).padStart(2, '0'))
         }
     })
 
