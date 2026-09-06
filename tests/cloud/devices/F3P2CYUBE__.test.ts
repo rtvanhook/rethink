@@ -241,15 +241,17 @@ describe('F3P2CYUBE__', () => {
         assert.equal(p.cycles, 59)
     })
 
-    test('rinsing, labelled by the cloud: remaining minutes track byte 15', () => {
+    test('rinsing, labelled by the cloud: remaining minutes and course energy track bytes 15 and 19', () => {
         const { ha, thinq } = makeDevice()
         const p = ha.devices[DEVICE_ID].properties
         thinq.emit('data', RINSING_17_MIN)
         assert.equal(p.status, 'Rinsing')
         assert.equal(p.previous_status, 'Running')
         assert.equal(p.remaining_time, 17)
+        assert.equal(p.energy, 48)
         thinq.emit('data', RINSING_EXTRA_RINSE_DROPPED)
         assert.equal(p.remaining_time, 15)
+        assert.equal(p.energy, 61)
         assert.equal(p.extra_rinse, 0)
         assert.equal(p.rinse_count, 1)
     })
