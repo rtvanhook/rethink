@@ -71,6 +71,11 @@ const RESERVE_LO_OFFSET = 13
 const ENERGY_OFFSET = 19
 const STATE_OFFSET = 22
 const PRESTATE_OFFSET = 23
+// SmartCourse code currently sitting in the 0xFF "Downloaded" slot — the specialty cycle the app shows as loaded,
+// echoed back in every status frame. Same code the WMDownload command carries (the byte after `10 0b`). Long
+// mislabeled a constant 0x69 because the slot rests on Small Load; it is NOT constant — it tracks each SmartCourse
+// as it is downloaded (verified across the 2026-09-05 capture). Mapped to a name via SMARTCOURSE.
+const DOWNLOAD_COURSE_OFFSET = 24
 const CYCLES_OFFSET = 29
 const SIGNAL_OFFSET = 30 // panel "Signal" (end-of-cycle chime / button beeps). CONFIRMED via an off/on capture:
 const SIGNAL_BIT = 0x04 // rec[30] 0x00 -> 0x04 as Signal was toggled on; symmetric in the previous-state record.
@@ -209,6 +214,112 @@ const START_COURSE_OPTIONS = [
 ]
 const DELAY_MAX_HOURS = 19 // the app's delay-start ceiling
 
+// ---- SmartCourse download (the "Specialty cycle" flow) ----
+// The 17 SmartCourses the app can DOWNLOAD into the machine's 0xFF slot — cycles that are NOT dial positions
+// (Baby Clothes, Denim, EconoWash, Overnight, …). Each entry: display name, the machine's own SmartCourse code
+// (the byte after `10 0b` in the WMDownload command AND the value echoed back in status at rec[24]), and the exact
+// captured WMDownload inner frame. Captured off the wire 2026-09-05 by pushing every one from the LG app; all 17
+// codes confirmed by name against the machine. NOTE the code is the MACHINE's SmartCourse id, NOT the modelJson
+// numeric `id` — the two disagree (modelJson calls EconoWash id 106, but its on-wire code is 0x78 / 120).
+// Flow: pick one on the `specialty` select -> it downloads (stores that cycle in the slot); `downloaded_course`
+// then reads back which is loaded; `start_course` -> 'Downloaded Course' runs it. Download is a write, so it is
+// gated by Remote Start like every other command (beep-and-ignore if off). The inner frames are checksum-verified:
+// re-framing each through send() reproduces the captured on-wire bytes exactly.
+const SPECIALTY_COURSES: Array<{ name: string; code: number; download: string }> = [
+    {
+        name: 'Sweat Stains',
+        code: 0x65,
+        download: 'f0e5000201ff100b650aff0c2e1f10210f1e013d00200e220010003e0034003800350144007f0000',
+    },
+    {
+        name: 'Swimwear',
+        code: 0x67,
+        download: 'f0e5000201ff100b670aff0c161f0e210d1e013d00200e220010003e0034003800350044007f0000',
+    },
+    {
+        name: 'Baby Clothes',
+        code: 0x68,
+        download: 'f0e5000201ff100b680aff0c2e1f12210f1e033d00200f220010003e0034013800350044007f0000',
+    },
+    {
+        name: 'Small Load',
+        code: 0x69,
+        download: 'f0e5000201ff100b690aff0c441f10210f1e033d00200e220010003e0034003800350044007f0000',
+    },
+    {
+        name: 'Overnight',
+        code: 0x6a,
+        download: 'f0e5000201ff100b6a0aff0c2e1f10210d1e033d00200e220010003e0034003800350044017f0000',
+    },
+    {
+        name: 'Single Garments',
+        code: 0x6b,
+        download: 'f0e5000201ff100b6b0aff0c4a1f12210f1e013d00200e220010003e0034003800350044007f0000',
+    },
+    {
+        name: 'Rainy Day',
+        code: 0x6d,
+        download: 'f0e5000201ff100b6d0aff0c2e1f1021101e033d00200e220010003e0034003800350144007f0000',
+    },
+    {
+        name: 'Gym Clothes',
+        code: 0x6e,
+        download: 'f0e5000201ff100b6e0aff0c4f1f10210e1e013d00200e220010003e0034003800350044007f0000',
+    },
+    {
+        name: 'Color Care',
+        code: 0x6f,
+        download: 'f0e5000201ff100b6f0aff0c2e1f0e210e1e033d00200e220010003e0034003800350144007f0000',
+    },
+    {
+        name: 'Denim',
+        code: 0x70,
+        download: 'f0e5000201ff100b700aff0c2e1f0e210e1e033d00200e220010003e0034003800350144007f0000',
+    },
+    {
+        name: 'Full Load',
+        code: 0x71,
+        download: 'f0e5000201ff100b710aff0c2e1f10210f1e053d00200f220010003e0034003800350044007f0000',
+    },
+    {
+        name: 'Beachwear',
+        code: 0x73,
+        download: 'f0e5000201ff100b730aff0c161f0e210e1e013d00200e220010003e0034003800350044007f0000',
+    },
+    {
+        name: 'New Clothes',
+        code: 0x74,
+        download: 'f0e5000201ff100b740aff0c2e1f0e210d1e013d00200e220010003e0034003800350144007f0000',
+    },
+    {
+        name: 'Half Load',
+        code: 0x76,
+        download: 'f0e5000201ff100b760aff0c2e1f10210f1e033d00200e220010003e0034003800350044007f0000',
+    },
+    {
+        name: 'EconoWash',
+        code: 0x78,
+        download: 'f0e5000201ff100b780aff0c2e1f0e210f1e033d00200e220010003e0034003801350044007f0000',
+    },
+    {
+        name: 'Delicate Dresses',
+        code: 0x79,
+        download: 'f0e5000201ff100b790aff0c161f0e210d1e013d00200e220010003e0034003800350044007f0000',
+    },
+    {
+        name: 'Hand Wash/Wool',
+        code: 0xdd,
+        download: 'f0e5000201ff100bdd0aff0c221f10210d1e033d00200e220010003e0034003800350044007f0000',
+    },
+]
+const SMARTCOURSE: Record<number, string> = Object.fromEntries(SPECIALTY_COURSES.map((c) => [c.code, c.name])) // code -> name, for decoding the downloaded_course status byte (rec[24])
+const SPECIALTY_DOWNLOAD: Record<string, string> = Object.fromEntries(
+    SPECIALTY_COURSES.map((c) => [c.name, c.download]),
+) // name -> WMDownload inner frame, for the specialty select's write
+// 'unknown' leads so the select rests un-armed and every pick is a fresh change (the machine ignores a re-download
+// of the course already loaded — snapping back to 'unknown' keeps HA always sending a real transition).
+const SPECIALTY_OPTIONS = ['unknown', ...SPECIALTY_COURSES.map((c) => c.name)]
+
 export default class Device extends AABBDevice {
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
@@ -255,6 +366,16 @@ export default class Device extends AABBDevice {
                         name: 'Course code',
                         icon: 'mdi:pound',
                         entity_category: 'diagnostic',
+                    },
+                    downloaded_course: {
+                        platform: 'sensor',
+                        unique_id: '$deviceid-downloaded_course',
+                        state_topic: '$this/downloaded_course',
+                        name: 'Downloaded course',
+                        icon: 'mdi:download-box-outline',
+                        // Which SmartCourse is loaded in the 0xFF slot (rec[24]), decoded via SMARTCOURSE. This is the
+                        // identity the app shows as "downloaded"; pairs with the `specialty` select (writes the slot)
+                        // and start_course -> 'Downloaded Course' (runs it). Rests on Small Load out of the box.
                     },
                     remaining_time: {
                         platform: 'sensor',
@@ -435,6 +556,19 @@ export default class Device extends AABBDevice {
                         // Optimistic (no state_topic): picking a course fires the config/start command for that
                         // course at its defaults, folding in the current Delay start value. Requires "Remote Start".
                     },
+                    specialty: {
+                        platform: 'select',
+                        unique_id: '$deviceid-specialty',
+                        command_topic: '$this/specialty/set',
+                        state_topic: '$this/specialty',
+                        options: SPECIALTY_OPTIONS,
+                        name: 'Specialty cycle (download)',
+                        icon: 'mdi:download-box-outline',
+                        // Picking a SmartCourse fires its WMDownload — storing that cycle in the 0xFF slot. It does
+                        // NOT start anything: `downloaded_course` then shows it loaded, and start_course ->
+                        // 'Downloaded Course' runs it. Resets to 'unknown' after firing (see setProperty). This is the
+                        // access to LG's specialty cycles the stock integration does not give — the point of the fork.
+                    },
                     delay: {
                         platform: 'number',
                         unique_id: '$deviceid-delay',
@@ -502,6 +636,13 @@ export default class Device extends AABBDevice {
         this.publishProperty('previous_status', STATE[rec[PRESTATE_OFFSET]] ?? `Unknown (${rec[PRESTATE_OFFSET]})`)
         this.publishProperty('course_code', '0x' + rec[COURSE_OFFSET].toString(16).padStart(2, '0'))
         this.publishProperty('course', COURSE[rec[COURSE_OFFSET]] ?? 'unknown')
+        // Which SmartCourse is loaded in the 0xFF Downloaded slot (rec[24]); tracks the specialty download. 0x00 =
+        // empty slot; an unmapped code falls back to hex so a new/unknown SmartCourse is still visible, not hidden.
+        const dl = rec[DOWNLOAD_COURSE_OFFSET]
+        this.publishProperty(
+            'downloaded_course',
+            SMARTCOURSE[dl] ?? (dl === 0 ? 'None' : '0x' + dl.toString(16).padStart(2, '0')),
+        )
         // Zeroed while Off: the machine keeps stale settings bytes after power-off.
         const reserve = (rec[RESERVE_HI_OFFSET] << 8) | rec[RESERVE_LO_OFFSET]
         this.publishProperty('delay_wash', reserve > 0 ? 'ON' : 'OFF')
@@ -565,7 +706,8 @@ export default class Device extends AABBDevice {
         // All commands below are EXACT cloud->device packets captured via bridge mode while driving the LG app,
         // each checksum-verified against AABBDevice.send(). Gated by remote start (see above): beep-and-ignore if off.
         // No bare 'start' command: the app never sends a stateful "begin the dialed cycle" — starting is the
-        // stateless config/start blob (start_course). Only pause / resume / power_off / start_course are exposed.
+        // stateless config/start blob (start_course). Exposed: pause / resume / power_off / start_course / delay /
+        // specialty (WMDownload).
         if (prop === 'pause') this.send(Buffer.from('f0e5000201ff010302', 'hex'))
         else if (prop === 'resume')
             this.send(Buffer.from('f0e5000201ff0244000303', 'hex')) // resume-from-pause: a DISTINCT, longer packet than start
@@ -589,10 +731,20 @@ export default class Device extends AABBDevice {
             const h = Math.max(0, Math.min(DELAY_MAX_HOURS, Math.round(Number(value) || 0)))
             this.delayMinutes = h * 60
             this.publishProperty('delay', h)
+        } else if (prop === 'specialty') {
+            // WMDownload: store the picked SmartCourse into the 0xFF Downloaded slot (the specialty-cycle write).
+            // The exact captured download frame, re-checksummed by send(). Then snap back to 'unknown' so it stays
+            // re-fireable and never sits looking armed — the loaded cycle is read back on `downloaded_course`, and
+            // running it is start_course -> 'Downloaded Course'. Gated by Remote Start like every write.
+            const dl = SPECIALTY_DOWNLOAD[value]
+            if (dl !== undefined) {
+                this.send(Buffer.from(dl, 'hex'))
+                this.publishProperty('specialty', 'unknown')
+            }
         }
         // Out of scope (grammar known, not built): the full per-field cycle builder (temp/soil/spin/rinse/pre-wash/
-        // cold/steam/freshCare/delay overrides — see buildConfigStart); power ON (WMWakeup, moot after a remote off);
-        // and WMDownload (store a SmartCourse into the 0xFF Downloaded slot — a different command entirely).
+        // cold/steam/freshCare/delay overrides — see buildConfigStart); and power ON (WMWakeup, moot after a remote
+        // off). WMDownload IS built now — the `specialty` select, one captured frame per SmartCourse.
     }
 
     // Build the config/start command for a course at its defaults. Grammar reverse-engineered + confirmed against

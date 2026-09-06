@@ -428,4 +428,85 @@ describe('F3P2CYUBE__', () => {
         // byte-identical to the real captured app frame for Normal @ 1-hour delay
         assert.equal(hex(thinq.outbox[0]).toLowerCase(), 'aa12f0e5000201ff030a2e7f003c0301d8bb')
     })
+
+    test('write: the specialty select emits each SmartCourse WMDownload, byte-identical to the capture', () => {
+        const { thinq, dev } = makeDevice()
+        // All 17 SmartCourse downloads, the exact cloud->device frames captured 2026-09-05 by pushing every one
+        // from the LG app. The device stores the inner frame; send() re-derives the AABB length + checksum, so a
+        // match here proves the stored inner + framing reproduces the real wire bytes for all 17.
+        const want: ReadonlyArray<readonly [string, string]> = [
+            [
+                'Sweat Stains',
+                'aa2cf0e5000201ff100b650aff0c2e1f10210f1e013d00200e220010003e0034003800350144007f00007bbb',
+            ],
+            ['Swimwear', 'aa2cf0e5000201ff100b670aff0c161f0e210d1e013d00200e220010003e0034003800350044007f000046bb'],
+            [
+                'Baby Clothes',
+                'aa2cf0e5000201ff100b680aff0c2e1f12210f1e033d00200f220010003e0034013800350044007f000063bb',
+            ],
+            ['Small Load', 'aa2cf0e5000201ff100b690aff0c441f10210f1e033d00200e220010003e0034003800350044007f00001cbb'],
+            ['Overnight', 'aa2cf0e5000201ff100b6a0aff0c2e1f10210d1e033d00200e220010003e0034003800350044017f000066bb'],
+            [
+                'Single Garments',
+                'aa2cf0e5000201ff100b6b0aff0c4a1f12210f1e013d00200e220010003e0034003800350044007f000004bb',
+            ],
+            ['Rainy Day', 'aa2cf0e5000201ff100b6d0aff0c2e1f1021101e033d00200e220010003e0034003800350144007f00006cbb'],
+            ['Gym Clothes', 'aa2cf0e5000201ff100b6e0aff0c4f1f10210e1e013d00200e220010003e0034003800350044007f000003bb'],
+            ['Color Care', 'aa2cf0e5000201ff100b6f0aff0c2e1f0e210e1e033d00200e220010003e0034003800350144007f000062bb'],
+            ['Denim', 'aa2cf0e5000201ff100b700aff0c2e1f0e210e1e033d00200e220010003e0034003800350144007f00006dbb'],
+            ['Full Load', 'aa2cf0e5000201ff100b710aff0c2e1f10210f1e053d00200f220010003e0034003800350044007f00006bbb'],
+            ['Beachwear', 'aa2cf0e5000201ff100b730aff0c161f0e210e1e013d00200e220010003e0034003800350044007f000075bb'],
+            ['New Clothes', 'aa2cf0e5000201ff100b740aff0c2e1f0e210d1e013d00200e220010003e0034003800350144007f00006cbb'],
+            ['Half Load', 'aa2cf0e5000201ff100b760aff0c2e1f10210f1e033d00200e220010003e0034003800350044007f000015bb'],
+            ['EconoWash', 'aa2cf0e5000201ff100b780aff0c2e1f0e210f1e033d00200e220010003e0034003801350044007f000014bb'],
+            [
+                'Delicate Dresses',
+                'aa2cf0e5000201ff100b790aff0c161f0e210d1e013d00200e220010003e0034003800350044007f000070bb',
+            ],
+            [
+                'Hand Wash/Wool',
+                'aa2cf0e5000201ff100bdd0aff0c221f10210d1e033d00200e220010003e0034003800350044007f0000ccbb',
+            ],
+        ]
+        for (const [name, frame] of want) {
+            thinq.resetRecorder()
+            dev.setProperty('specialty', name)
+            assert.equal(hex(thinq.outbox[0]).toLowerCase(), frame, name)
+        }
+    })
+
+    test('write: the specialty select snaps back to unknown after firing (re-fireable)', () => {
+        const { ha, thinq, dev } = makeDevice()
+        dev.setProperty('specialty', 'Denim')
+        assert.equal(ha.devices[DEVICE_ID].properties.specialty, 'unknown')
+        // an unknown name is a no-op (nothing sent), never a bad frame
+        thinq.resetRecorder()
+        dev.setProperty('specialty', 'unknown')
+        assert.equal(thinq.outbox.length, 0)
+    })
+
+    test('read: downloaded_course decodes the slot byte rec[24] to its SmartCourse name', () => {
+        const { ha, thinq } = makeDevice()
+        const p = ha.devices[DEVICE_ID].properties
+        // synthetic 0xEB frame whose only meaningful byte is rec[24], the downloaded-slot SmartCourse code
+        const mk = (code: number) => {
+            const rec = Buffer.alloc(44)
+            rec[0] = 0x2b
+            rec[24] = code
+            const body = Buffer.concat([Buffer.from([0x20, 0xeb, 0x00]), rec])
+            return Buffer.concat([Buffer.from([0xaa, body.length + 4]), body, Buffer.from([0x00, 0xbb])])
+        }
+        const expect: Record<number, string> = {
+            0x69: 'Small Load', // the resting slot
+            0x70: 'Denim',
+            0x6a: 'Overnight',
+            0xdd: 'Hand Wash/Wool',
+            0x00: 'None', // empty slot
+            0xab: '0xab', // unmapped code falls back to hex, never hidden
+        }
+        for (const [code, name] of Object.entries(expect)) {
+            thinq.emit('data', mk(Number(code)))
+            assert.equal(p.downloaded_course, name, `rec[24]=0x${Number(code).toString(16)}`)
+        }
+    })
 })
