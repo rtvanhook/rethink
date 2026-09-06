@@ -71,9 +71,8 @@ const RESERVE_LO_OFFSET = 13
 const ENERGY_OFFSET = 19
 const STATE_OFFSET = 22
 const PRESTATE_OFFSET = 23
-const RINSE_COUNT_OFFSET = 28 // number of rinses (1=default .. 4=+3 extra)
-const FLAGS40_OFFSET = 40
-const FLAG40_EXTRA_RINSE = 0x40 // CONFIRMED via a full 0..3 sweep: set whenever rinse count > 1
+const RINSE_COUNT_OFFSET = 28 // TOTAL rinses (1=default .. 4=+3 extra); diagnostic. Extra Rinse is derived from
+// rec[4] instead (0x0E none .. 0x11 +3), so it's the user's added-rinse count, not the course-inflated total.
 const CYCLES_OFFSET = 29
 const SIGNAL_OFFSET = 30 // panel "Signal" (end-of-cycle chime / button beeps). CONFIRMED via an off/on capture:
 const SIGNAL_BIT = 0x04 // rec[30] 0x00 -> 0x04 as Signal was toggled on; symmetric in the previous-state record.
@@ -99,10 +98,9 @@ const OPT37_FRESH_CARE = 0x40 // pinned live: rec[37] 0x00->0x40 with cloud fres
 const OPTS38_OFFSET = 38
 const OPT38_DOOR_LOCK = 0x10
 const OPT38_CHILD_LOCK = 0x20 // pinned live: rec[38] 0x40->0x60 with cloud childLock ON (this model DOES expose it in-frame, unlike the F3L2CYU__ sibling)
-const OPT38_DOOR_CLOSED = 0x40 // pinned live: bit 0x40 = door closed (clear = open), proven by forcing a frame
-// (Temp press) with the door held open -> bit cleared. CAVEAT: this washer does NOT emit a frame on a
-// door-only change, so the bit refreshes only when some other event makes it talk — the HA door state can
-// lag reality until the next status frame. That is also why the LG app shows no door tile for this model.
+// rec[38] bit 0x40 was thought to be a door-closed sensor but it is NOT: it read "open" with the door shut and
+// even while the door was locked (impossible). No door entity is published; needs a clean open-vs-closed
+// capture pair to identify the real bit (if any). LG's own app shows no door tile for this model.
 
 const STATE_OFF = 0x00
 
@@ -152,14 +150,6 @@ const TEMP: Record<number, string> = {
     19: 'Extra Hot',
 }
 
-const RINSE: Record<number, string> = {
-    0: 'None',
-    14: 'Normal',
-    15: 'Plus',
-    16: 'Plus 2',
-    17: 'Plus 3',
-}
-
 const SPIN: Record<number, string> = {
     0: 'None',
     12: 'Drain Only',
@@ -173,6 +163,7 @@ const SPIN: Record<number, string> = {
 // the dial live against the cloud's own course field — a full sweep of every dial position (2026-09-05),
 // including the long-press Spin Only. 0xFF is the downloaded-course slot.
 const COURSE: Record<number, string> = {
+    0x00: 'None', // idle / nothing selected — the dial hasn't been read (power-on, standby)
     0x05: 'Allergiene',
     0x0d: 'Bedding',
     0x16: 'Delicates',
@@ -283,27 +274,22 @@ export default class Device extends AABBDevice {
                         name: 'Temperature',
                         icon: 'mdi:thermometer',
                     },
-                    rinse: {
+                    extra_rinse: {
                         platform: 'sensor',
-                        unique_id: '$deviceid-rinse',
-                        state_topic: '$this/rinse',
-                        name: 'Rinse',
-                        icon: 'mdi:water-sync',
+                        unique_id: '$deviceid-extra_rinse',
+                        state_topic: '$this/extra_rinse',
+                        name: 'Extra rinse',
+                        icon: 'mdi:water-plus',
+                        state_class: 'measurement',
                     },
                     rinse_count: {
                         platform: 'sensor',
                         unique_id: '$deviceid-rinse_count',
                         state_topic: '$this/rinse_count',
-                        name: 'Rinse count',
+                        name: 'Rinse count (total)',
                         icon: 'mdi:water-sync',
                         state_class: 'measurement',
-                    },
-                    extra_rinse: {
-                        platform: 'binary_sensor',
-                        unique_id: '$deviceid-extra_rinse',
-                        state_topic: '$this/extra_rinse',
-                        name: 'Extra rinse',
-                        icon: 'mdi:water-plus',
+                        entity_category: 'diagnostic',
                     },
                     cold_wash: {
                         platform: 'binary_sensor',
@@ -360,7 +346,8 @@ export default class Device extends AABBDevice {
                         state_topic: '$this/door_lock',
                         name: 'Door lock',
                         icon: 'mdi:lock',
-                        entity_category: 'diagnostic',
+                        // No device_class: we publish ON = locked, but HA's 'lock' class means ON = UNLOCKED, so
+                        // it would invert. Plain On/Off with the lock icon reads correctly (On = locked).
                     },
                     child_lock: {
                         platform: 'binary_sensor',
@@ -368,13 +355,6 @@ export default class Device extends AABBDevice {
                         state_topic: '$this/child_lock',
                         name: 'Child lock',
                         icon: 'mdi:account-lock',
-                    },
-                    door: {
-                        platform: 'binary_sensor',
-                        unique_id: '$deviceid-door',
-                        state_topic: '$this/door',
-                        name: 'Door',
-                        device_class: 'door', // payload ON = open, OFF = closed. NOTE: not event-pushed — refreshes only on the next status frame, so it can lag a door-only change.
                     },
                     start: {
                         platform: 'button',
@@ -411,7 +391,7 @@ export default class Device extends AABBDevice {
                         platform: 'sensor',
                         unique_id: '$deviceid-cycles',
                         state_topic: '$this/cycles',
-                        name: 'Cycles since tub clean',
+                        name: 'Cycles Since Clean',
                         icon: 'mdi:counter',
                         state_class: 'total',
                         entity_category: 'diagnostic',
@@ -459,9 +439,11 @@ export default class Device extends AABBDevice {
         this.publishProperty('initial_time', isOff ? 0 : rec[INITIAL_HOUR_OFFSET] * 60 + rec[INITIAL_MIN_OFFSET])
         this.publishProperty('soil', SOIL[rec[SOIL_OFFSET]] ?? 'unknown')
         this.publishProperty('temp', TEMP[rec[TEMP_OFFSET]] ?? 'unknown')
-        this.publishProperty('rinse', RINSE[rec[RINSE_OFFSET]] ?? 'unknown')
+        // Extra Rinse is one number, 0..3 — the count of extra rinses the user added, straight off rec[4]
+        // (0x0E none .. 0x11 +3). rinse_count (rec[28]) is the TOTAL including course-built-in rinses, so it
+        // can exceed the extra count (e.g. Towels = 3 total with 0 extra); kept as a diagnostic, not the headline.
+        this.publishProperty('extra_rinse', Math.max(0, Math.min(3, rec[RINSE_OFFSET] - 0x0e)))
         this.publishProperty('rinse_count', rec[RINSE_COUNT_OFFSET])
-        this.publishProperty('extra_rinse', (rec[FLAGS40_OFFSET] & FLAG40_EXTRA_RINSE) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('cold_wash', (rec[OPTS35_OFFSET] & OPT35_COLD_WASH) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('turbo_wash', (rec[OPTS35_OFFSET] & OPT35_TURBO_WASH) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('pre_wash', (rec[OPTS35_OFFSET] & OPT35_PRE_WASH) !== 0 ? 'ON' : 'OFF')
@@ -471,7 +453,9 @@ export default class Device extends AABBDevice {
         this.publishProperty('signal', (rec[SIGNAL_OFFSET] & SIGNAL_BIT) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('door_lock', (rec[OPTS38_OFFSET] & OPT38_DOOR_LOCK) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('child_lock', (rec[OPTS38_OFFSET] & OPT38_CHILD_LOCK) !== 0 ? 'ON' : 'OFF')
-        this.publishProperty('door', (rec[OPTS38_OFFSET] & OPT38_DOOR_CLOSED) !== 0 ? 'OFF' : 'ON') // door_class: ON=open
+        // door sensor REMOVED: rec[38] bit 0x40 does not track the door — it read "open" while the door was
+        // shut and even while locked (physically impossible). Needs a clean open-vs-closed capture pair to ever
+        // restore; LG's own app omits a door tile for this model, likely for the same unreliability.
         this.publishProperty('spin', SPIN[rec[SPIN_OFFSET]] ?? 'unknown')
         this.publishProperty('cycles', rec[CYCLES_OFFSET])
         this.publishProperty('energy', rec[ENERGY_OFFSET])

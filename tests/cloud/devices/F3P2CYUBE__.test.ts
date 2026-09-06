@@ -198,7 +198,7 @@ describe('F3P2CYUBE__', () => {
         assert.equal(p.course_code, 0x2e)
         assert.equal(p.soil, 'Normal')
         assert.equal(p.temp, 'Warm')
-        assert.equal(p.rinse, 'Normal')
+        assert.equal(p.extra_rinse, 0)
         assert.equal(p.spin, 'High')
         assert.equal(p.remaining_time, 46)
         assert.equal(p.initial_time, 46)
@@ -216,8 +216,8 @@ describe('F3P2CYUBE__', () => {
         assert.equal(p.soil, 'Normal-Heavy')
         assert.equal(p.remaining_time, 51)
         thinq.emit('data', EXTRA_RINSE_ON)
-        assert.equal(p.rinse, 'Plus') // rinse LEVEL (rec[4]) is the real control; there is no separate confirmed extra-rinse flag
-        assert.equal(p.rinse_count, 2)
+        assert.equal(p.extra_rinse, 1) // Extra Rinse = rec[4] - 0x0E; one +1 press
+        assert.equal(p.rinse_count, 2) // total (1 default + 1 extra)
         assert.equal(p.remaining_time, 56)
     })
 
@@ -252,7 +252,7 @@ describe('F3P2CYUBE__', () => {
         thinq.emit('data', RINSING_EXTRA_RINSE_DROPPED)
         assert.equal(p.remaining_time, 15)
         assert.equal(p.energy, 61)
-        assert.equal(p.rinse, 'Normal')
+        assert.equal(p.extra_rinse, 0)
         assert.equal(p.rinse_count, 1)
     })
 
@@ -356,16 +356,6 @@ describe('F3P2CYUBE__', () => {
         assert.equal(p.delay_wash, 'OFF')
     })
 
-    test('door sensor on rec[38] bit 0x40 (ON=open), independent of lock and child-lock', () => {
-        const { ha, thinq } = makeDevice()
-        const p = ha.devices[DEVICE_ID].properties
-        thinq.emit('data', DOOR_OPEN)
-        assert.equal(p.door, 'ON') // open
-        assert.equal(p.door_lock, 'OFF')
-        thinq.emit('data', DOOR_CLOSED)
-        assert.equal(p.door, 'OFF') // closed
-    })
-
     test('Rinse+Spin subcycle on rec[36] bit 0x20; temp/soil report null while active', () => {
         const { ha, thinq } = makeDevice()
         const p = ha.devices[DEVICE_ID].properties
@@ -379,25 +369,21 @@ describe('F3P2CYUBE__', () => {
         assert.equal(p.soil, 'Heavy')
     })
 
-    test('extra-rinse sweep: rinse level, count, and the extra-rinse flag across 0..3', () => {
+    test('extra-rinse sweep: Extra Rinse is a 0..3 number (rec[4]); rinse count is the total', () => {
         const { ha, thinq } = makeDevice()
         const p = ha.devices[DEVICE_ID].properties
         thinq.emit('data', RINSE_0)
-        assert.equal(p.rinse, 'Normal')
+        assert.equal(p.extra_rinse, 0)
         assert.equal(p.rinse_count, 1)
-        assert.equal(p.extra_rinse, 'OFF')
         thinq.emit('data', RINSE_1)
-        assert.equal(p.rinse, 'Plus')
+        assert.equal(p.extra_rinse, 1)
         assert.equal(p.rinse_count, 2)
-        assert.equal(p.extra_rinse, 'ON')
         thinq.emit('data', RINSE_2)
-        assert.equal(p.rinse, 'Plus 2')
+        assert.equal(p.extra_rinse, 2)
         assert.equal(p.rinse_count, 3)
-        assert.equal(p.extra_rinse, 'ON')
         thinq.emit('data', RINSE_3)
-        assert.equal(p.rinse, 'Plus 3')
+        assert.equal(p.extra_rinse, 3)
         assert.equal(p.rinse_count, 4)
-        assert.equal(p.extra_rinse, 'ON')
     })
 
     test('write: power OFF emits the exact captured WMOff packet', () => {
