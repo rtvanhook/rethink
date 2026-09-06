@@ -38,12 +38,14 @@ import AABBDevice from './aabb_device'
 //   rec[35]  bit 0x04 cold wash, 0x20 turbo wash (course-locked on some courses), 0x40 pre-wash
 //   rec[36]  bit 0x10 steam, 0x20 Rinse+Spin subcycle (temp & soil report null while it is active)
 //   rec[37]  bit 0x40 FreshCare
-//   rec[38]  bit 0x10 remote start (drives the annunciator lamp), 0x20 child lock, 0x40 unmapped
+//   rec[38]  bit 0x10 remote start (drives the annunciator lamp), 0x20 child lock, 0x40 DOOR OPEN (doorClose),
+//            0x80 Add Item (addGarment)
+//   rec[41]  bit 0x01 AI DD badge (AIDDLed) — course-linked (on for Normal & Bright Whites)
 //
 // Examined and left unmapped (not user-facing features): rec[21] single-frame transient; rec[25] phase-progress
-// sub-byte, redundant with state; rec[41] powered-on/settings-active flag. This frame carries no door signal at
-// all — neither door position nor the physical door lock (see the note in processStatus). Error codes not yet
-// observed.
+// sub-byte, redundant with state. Door POSITION is carried (rec[38] 0x40 = doorClose, published as `door`); the
+// physical door LOCK is NOT in-frame and not in LG's MonitoringValue (its app shows no lock tile either). Error
+// codes not yet observed.
 
 const STATUS_FRAME_TYPE = 0xec
 const STATUS_FRAME_LEN = 92 // 3B header + 45B record A + 44B record B
@@ -95,8 +97,16 @@ const OPT37_FRESH_CARE = 0x40 // pinned live: rec[37] 0x00->0x40 with cloud fres
 const OPTS38_OFFSET = 38
 const OPT38_REMOTE_START = 0x10
 const OPT38_CHILD_LOCK = 0x20 // child lock; confirmed against the cloud's childLock (this model exposes it in-frame, unlike the sibling)
-// rec[38] bit 0x40: unmapped. It moves but tracks neither remote start (0x10) nor child lock (0x20) reliably,
-// and it is not a trustworthy door signal. Not published.
+const OPT38_DOOR_OPEN = 0x40 // door OPEN/closed (LG's doorClose/initialBit, a MonitoringValue). CONFIRMED live against
+// labeled frames: 0x00 closed -> 0x40 open, independent of remote_start (0x10) and child_lock (0x20). This is door
+// POSITION, not the lock — the physical door LOCK is not in-frame (LG never puts it in MonitoringValue). Caveat: the
+// module frames on STATE changes, so this can lag an open/close by a frame; it is a position report, not an interlock.
+const OPT38_ADD_ITEM = 0x80 // Add Item annunciator (LG's addGarment). CONFIRMED live: set for the whole Add-Item
+// episode (which pauses, drains, and unlocks); a PLAIN pause clears remote_start WITHOUT setting this bit, which is
+// what distinguishes it. Cleared on resume.
+const AIDDLED_OFFSET = 41
+const AIDDLED_BIT = 0x01 // AI DD fabric-sensing badge (LG's AIDDLed). Purely a function of the selected course (on
+// for Normal & Bright Whites, off for all others) — the cloud reports it, so we mirror it.
 
 const STATE_OFF = 0x00
 
@@ -348,6 +358,29 @@ export default class Device extends AABBDevice {
                         name: 'Child lock',
                         icon: 'mdi:account-lock',
                     },
+                    door: {
+                        platform: 'binary_sensor',
+                        unique_id: '$deviceid-door',
+                        state_topic: '$this/door',
+                        name: 'Door',
+                        device_class: 'door', // ON = open. Door POSITION (LG's doorClose), not the lock.
+                        icon: 'mdi:door',
+                    },
+                    add_item: {
+                        platform: 'binary_sensor',
+                        unique_id: '$deviceid-add_item',
+                        state_topic: '$this/add_item',
+                        name: 'Add Item',
+                        icon: 'mdi:tshirt-crew',
+                    },
+                    ai_dd: {
+                        platform: 'binary_sensor',
+                        unique_id: '$deviceid-ai_dd',
+                        state_topic: '$this/ai_dd',
+                        name: 'AI DD',
+                        icon: 'mdi:brain',
+                        entity_category: 'diagnostic',
+                    },
                     start: {
                         platform: 'button',
                         unique_id: '$deviceid-start',
@@ -371,6 +404,14 @@ export default class Device extends AABBDevice {
                         payload_press: '',
                         name: 'Resume',
                         icon: 'mdi:play-pause',
+                    },
+                    stop: {
+                        platform: 'button',
+                        unique_id: '$deviceid-stop',
+                        command_topic: '$this/stop/set',
+                        payload_press: '',
+                        name: 'Stop',
+                        icon: 'mdi:stop-circle-outline',
                     },
                     spin: {
                         platform: 'sensor',
@@ -446,10 +487,12 @@ export default class Device extends AABBDevice {
         this.publishProperty('signal', (rec[SIGNAL_OFFSET] & SIGNAL_BIT) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('remote_start', (rec[OPTS38_OFFSET] & OPT38_REMOTE_START) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('child_lock', (rec[OPTS38_OFFSET] & OPT38_CHILD_LOCK) !== 0 ? 'ON' : 'OFF')
-        // No door entity at all — neither position nor lock. The machine frames only on a STATE change, never on
-        // the door opening/closing, so a door-position sensor would sit stale (a tempting, dangerous thing to
-        // automate on). And rec[38] 0x10, once mistaken for the door lock, is actually remote start (above) — it
-        // clears with the door still locked. LG's app shows no door tile either; the physical lock isn't in-frame.
+        // Door POSITION (open/closed) — LG's doorClose. ON = open. NOT the physical lock, which is not in-frame and
+        // not in LG's MonitoringValue (see OPT38_DOOR_OPEN). rec[38] 0x10, once mistaken for the lock, is remote start.
+        this.publishProperty('door', (rec[OPTS38_OFFSET] & OPT38_DOOR_OPEN) !== 0 ? 'ON' : 'OFF')
+        this.publishProperty('add_item', (rec[OPTS38_OFFSET] & OPT38_ADD_ITEM) !== 0 ? 'ON' : 'OFF')
+        // AI DD badge (LG's AIDDLed): course-linked, mirrored from the cloud (see AIDDLED_OFFSET).
+        this.publishProperty('ai_dd', (rec[AIDDLED_OFFSET] & AIDDLED_BIT) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('spin', SPIN[rec[SPIN_OFFSET]] ?? 'unknown')
         this.publishProperty('cycles', rec[CYCLES_OFFSET])
         this.publishProperty('energy', rec[ENERGY_OFFSET])
@@ -474,6 +517,11 @@ export default class Device extends AABBDevice {
         else if (prop === 'pause') this.send(Buffer.from('f0e5000201ff010302', 'hex'))
         else if (prop === 'resume')
             this.send(Buffer.from('f0e5000201ff0244000303', 'hex')) // resume-from-pause: a DISTINCT, longer packet than start
+        else if (prop === 'stop')
+            // LG's WMStop operation. Per the modelJson, WMStop's controlDataType is PAUSE: LG's remote "stop" IS a
+            // pause — there is no remote cycle-cancel, only pause / power-off / start. Same packet as pause, exposed
+            // under LG's start/stop/power_off operation name.
+            this.send(Buffer.from('f0e5000201ff010302', 'hex'))
         else if (prop === 'power' && value === 'OFF') {
             // WMOff. WARNING: remote power-off drops the appliance's Wi-Fi module and there is NO reliable
             // remote wake afterward — you strand the connection and must walk to the machine. The LG app warns
