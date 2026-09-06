@@ -198,11 +198,11 @@ describe('F3P2CYUBE__', () => {
         assert.equal(p.course_code, '0x2e')
         assert.equal(p.soil, 'Normal')
         assert.equal(p.temp, 'Warm')
-        assert.equal(p.extra_rinse, 0)
+        assert.equal(p.extra_rinse, 'OFF')
         assert.equal(p.spin, 'High')
         assert.equal(p.remaining_time, 46)
         assert.equal(p.initial_time, 46)
-        assert.equal(p.rinse_count, 1)
+        assert.equal(p.extra_rinse_count, 0)
     })
 
     test('single-variable settings changes decode temp, soil and extra rinse', () => {
@@ -216,8 +216,8 @@ describe('F3P2CYUBE__', () => {
         assert.equal(p.soil, 'Normal-Heavy')
         assert.equal(p.remaining_time, 51)
         thinq.emit('data', EXTRA_RINSE_ON)
-        assert.equal(p.extra_rinse, 1) // Extra Rinse = rec[4] - 0x0E; one +1 press
-        assert.equal(p.rinse_count, 2) // total (1 default + 1 extra)
+        assert.equal(p.extra_rinse, 'ON')
+        assert.equal(p.extra_rinse_count, 1) // rec[4] - 0x0E; one +1 press
         assert.equal(p.remaining_time, 56)
     })
 
@@ -252,8 +252,8 @@ describe('F3P2CYUBE__', () => {
         thinq.emit('data', RINSING_EXTRA_RINSE_DROPPED)
         assert.equal(p.remaining_time, 15)
         assert.equal(p.energy, 61)
-        assert.equal(p.extra_rinse, 0)
-        assert.equal(p.rinse_count, 1)
+        assert.equal(p.extra_rinse, 'OFF')
+        assert.equal(p.extra_rinse_count, 0)
     })
 
     test('cold wash toggles on rec[35] bit 0x04, isolated', () => {
@@ -369,21 +369,21 @@ describe('F3P2CYUBE__', () => {
         assert.equal(p.soil, 'Heavy')
     })
 
-    test('extra-rinse sweep: Extra Rinse is a 0..3 number (rec[4]); rinse count is the total', () => {
+    test('extra-rinse sweep: extra_rinse flag + extra_rinse_count (rec[4]) across 0..3', () => {
         const { ha, thinq } = makeDevice()
         const p = ha.devices[DEVICE_ID].properties
         thinq.emit('data', RINSE_0)
-        assert.equal(p.extra_rinse, 0)
-        assert.equal(p.rinse_count, 1)
+        assert.equal(p.extra_rinse, 'OFF')
+        assert.equal(p.extra_rinse_count, 0)
         thinq.emit('data', RINSE_1)
-        assert.equal(p.extra_rinse, 1)
-        assert.equal(p.rinse_count, 2)
+        assert.equal(p.extra_rinse, 'ON')
+        assert.equal(p.extra_rinse_count, 1)
         thinq.emit('data', RINSE_2)
-        assert.equal(p.extra_rinse, 2)
-        assert.equal(p.rinse_count, 3)
+        assert.equal(p.extra_rinse, 'ON')
+        assert.equal(p.extra_rinse_count, 2)
         thinq.emit('data', RINSE_3)
-        assert.equal(p.extra_rinse, 3)
-        assert.equal(p.rinse_count, 4)
+        assert.equal(p.extra_rinse, 'ON')
+        assert.equal(p.extra_rinse_count, 3)
     })
 
     test('write: power OFF emits the exact captured WMOff packet', () => {

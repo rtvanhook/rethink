@@ -17,35 +17,32 @@ import AABBDevice from './aabb_device'
 //   0xBD / 0xCD  full status dump / idle keepalive (~405-410 bytes) — not decoded.
 //   0x31, 0x72, 0xD8, 0xE6, 0x00  serial / heartbeat / misc — not decoded.
 //
-// Field offsets are relative to the record's 0x2B marker (rec[0]). Every "confirmed" offset below was pinned
-// against the LG cloud's own decoded washerDryer state (rethink-capture --cloud, bridge mode) or the LG ThinQ
-// integration in Home Assistant at matching timestamps; "enum-consistent" offsets carry values that only make
-// sense as the named modelJson enum and moved with the matching panel action, but have not yet been echoed by
-// a cloud delta. Enum indices are the modelJson's MonitoringValue indices verbatim.
+// Field offsets are relative to the record's 0x2B marker (rec[0]). Values were verified against the LG cloud's
+// own decoded washerDryer state (bridge mode) and the LG ThinQ integration in Home Assistant, and by driving the
+// panel and watching the byte move. Enum indices are the modelJson's MonitoringValue indices verbatim.
 //
-//   rec[2]   soilWash        enum-consistent (3 Normal -> 4 Normal-Heavy on a panel change)
-//   rec[3]   temp            enum-consistent (16 Warm default -> 18 Hot -> 13 Tap Cold as the button was pressed)
-//   Examined and deliberately NOT mapped (not user-facing features, characterized over a 124-frame capture):
-//     rec[21] — single-frame transient (0x44 once, else 0x00); noise, not a field.
-//     rec[25] — phase-progress sub-byte (0x07 selecting, 0x03 rinsing/spinning); redundant with `state`.
-//     rec[41] — powered-on/settings-active flag (0x01 while a selection is live, 0x00 at Off/End).
-//   rec[4]   rinse           CONFIRMED all 4 levels via a 0..3 extra-rinse sweep: 0E Normal,0F Plus,10 Plus2,11 Plus3
-//   rec[28]  rinse count     CONFIRMED 1..4 (default 1 + extra); rec[40] bit 0x40 = extra-rinse flag (count>1)
-//   rec[5]   spin            enum-consistent (0x0F = SPIN_HIGH, the Normal course default)
-//   rec[6]   course code     the dial position; the modelJson course table has NO numeric ids, so names are
-//                            filled in by observation (see COURSE). 0x2E is the course of the first capture.
-//   rec[14:16] remainTime    hour, minute — CONFIRMED (cloud remainTimeMinute 17 -> 16 -> 15 -> 14 tracked byte 15)
-//   rec[16:18] initialTime   hour, minute — CONFIRMED (0x28 = the 40-minute total HA reported for the cycle)
-//   rec[19]  courseSpendPower CONFIRMED (cloud 48, 51, 61, 62 tracked byte 19 exactly); unit not documented
-//   rec[22]  state           CONFIRMED (0x0B Running while HA said running, 0x0C Rinsing while HA said rinsing)
-//   rec[23]  preState        CONFIRMED by the same transitions (0x03 Detecting -> 0x0B Running -> 0x0C Rinsing)
-//   rec[28]  rinse count     enum-consistent (2 with extra rinse on, 1 after cloud reported rinseCount RINSE_1)
-//   rec[29]  TCLCount        CONFIRMED (0x3B = 59 = HA's cycle counter)
-//   rec[35]  options: bit 0x04 cold wash (CONFIRMED), bit 0x20 turbo wash (CONFIRMED on Speed Wash)
-//   rec[36]  bit 0x10 steam (CONFIRMED). rec[38] bit 0x10 remote-start armed (CONFIRMED selecting; shared
-//            with the running-state door lock). not yet located: door, door lock (standalone), child lock, delay/reserve time (rec[12:14] is the likely
-//   slot, all-zero so far), error bits. Declared entities are omitted rather than
-//   published wrong — the sibling's rule.
+//   rec[2]   soil            enum (SOIL)
+//   rec[3]   temp            enum (TEMP)
+//   rec[4]   rinse level     0x0E none .. 0x11 +3 extra — published as extra_rinse (flag) + extra_rinse_count (0..3)
+//   rec[5]   spin            enum (SPIN)
+//   rec[6]   course          dial position; COURSE maps the codes to names (read off the dial — the modelJson
+//                            names the courses but assigns them no numeric ids)
+//   rec[12:14] reserve       delay-wash minutes, 16-bit big-endian; 0 unless a delay is armed
+//   rec[14:16] remainTime    hour, minute — remaining time
+//   rec[16:18] initialTime   hour, minute — total cycle time
+//   rec[19]  courseSpendPower LG's field name; tracks a cloud value but its unit/meaning is undocumented — published raw
+//   rec[22]  state           enum (STATE); rec[23] holds the previous state
+//   rec[28]  rinse count     TOTAL rinses incl. a course's built-ins; NOT published (extra_rinse_count is the added count)
+//   rec[29]  cycles          count since the last Tub Clean
+//   rec[30]  bit 0x04        Signal (end-of-cycle chime / button beeps)
+//   rec[35]  bit 0x04 cold wash, 0x20 turbo wash (course-locked on some courses), 0x40 pre-wash
+//   rec[36]  bit 0x10 steam, 0x20 Rinse+Spin subcycle (temp & soil report null while it is active)
+//   rec[37]  bit 0x40 FreshCare
+//   rec[38]  bit 0x10 door lock, 0x20 child lock, 0x40 a door-latch state bit (see the door note in processStatus)
+//
+// Examined and left unmapped (not user-facing features): rec[21] single-frame transient; rec[25] phase-progress
+// sub-byte, redundant with state; rec[41] powered-on/settings-active flag. This frame carries no door-POSITION
+// sensor and no remote-start bit (see the door note in processStatus). Error codes not yet observed.
 
 const STATUS_FRAME_TYPE = 0xec
 const STATUS_FRAME_LEN = 92 // 3B header + 45B record A + 44B record B
@@ -71,8 +68,6 @@ const RESERVE_LO_OFFSET = 13
 const ENERGY_OFFSET = 19
 const STATE_OFFSET = 22
 const PRESTATE_OFFSET = 23
-const RINSE_COUNT_OFFSET = 28 // TOTAL rinses (1=default .. 4=+3 extra); diagnostic. Extra Rinse is derived from
-// rec[4] instead (0x0E none .. 0x11 +3), so it's the user's added-rinse count, not the course-inflated total.
 const CYCLES_OFFSET = 29
 const SIGNAL_OFFSET = 30 // panel "Signal" (end-of-cycle chime / button beeps). CONFIRMED via an off/on capture:
 const SIGNAL_BIT = 0x04 // rec[30] 0x00 -> 0x04 as Signal was toggled on; symmetric in the previous-state record.
@@ -86,9 +81,9 @@ const OPT35_COLD_WASH = 0x04
 const OPT35_TURBO_WASH = 0x20
 const OPT35_PRE_WASH = 0x40 // pinned live: rec[35] 0x20->0x60 with cloud preWash ON
 // rec[36] bit 0x10 = steam, bit 0x20 = Rinse+Spin subcycle (temp/soil null while active). rec[37] bit 0x40 = FreshCare.
-// rec[38] bit 0x10 = DOOR LOCK. It engaged when remote start was armed (the machine pre-locks the door so it
-// can start unattended — user-confirmed) and it is also set throughout a running cycle. The cloud's
-// remoteStart field tracks the arm event, but the physical bit is the lock, so that is what we publish.
+// rec[38] bit 0x10 = DOOR LOCK — set whenever the door is locked: a running cycle, an armed delay, or an armed
+// remote start (which pre-locks the door so it can start unattended). This frame carries no remote-start-specific
+// bit; "remote start armed" is indistinguishable from any other locked state, so we publish only the lock.
 const OPTS36_OFFSET = 36
 const OPT36_STEAM = 0x10
 const OPT36_RINSE_SPIN = 0x20 // pinned live: rec[36] bit 0x20 = Rinse+Spin subcycle active (a modifier on the
@@ -97,10 +92,9 @@ const OPTS37_OFFSET = 37
 const OPT37_FRESH_CARE = 0x40 // pinned live: rec[37] 0x00->0x40 with cloud freshCare ON
 const OPTS38_OFFSET = 38
 const OPT38_DOOR_LOCK = 0x10
-const OPT38_CHILD_LOCK = 0x20 // pinned live: rec[38] 0x40->0x60 with cloud childLock ON (this model DOES expose it in-frame, unlike the F3L2CYU__ sibling)
-// rec[38] bit 0x40 was thought to be a door-closed sensor but it is NOT: it read "open" with the door shut and
-// even while the door was locked (impossible). No door entity is published; needs a clean open-vs-closed
-// capture pair to identify the real bit (if any). LG's own app shows no door tile for this model.
+const OPT38_CHILD_LOCK = 0x20 // child lock; confirmed against the cloud's childLock (this model exposes it in-frame, unlike the sibling)
+// rec[38] bit 0x40 is a door-latch STATE bit (set when the door is closed-but-unlocked, cleared when locked or
+// open), NOT a reliable door-position sensor — see the door note in processStatus. Not published.
 
 const STATE_OFF = 0x00
 
@@ -275,21 +269,19 @@ export default class Device extends AABBDevice {
                         icon: 'mdi:thermometer',
                     },
                     extra_rinse: {
-                        platform: 'sensor',
+                        platform: 'binary_sensor',
                         unique_id: '$deviceid-extra_rinse',
                         state_topic: '$this/extra_rinse',
                         name: 'Extra rinse',
                         icon: 'mdi:water-plus',
-                        state_class: 'measurement',
                     },
-                    rinse_count: {
+                    extra_rinse_count: {
                         platform: 'sensor',
-                        unique_id: '$deviceid-rinse_count',
-                        state_topic: '$this/rinse_count',
-                        name: 'Rinse count (total)',
-                        icon: 'mdi:water-sync',
+                        unique_id: '$deviceid-extra_rinse_count',
+                        state_topic: '$this/extra_rinse_count',
+                        name: 'Extra rinse count',
+                        icon: 'mdi:water-plus',
                         state_class: 'measurement',
-                        entity_category: 'diagnostic',
                     },
                     cold_wash: {
                         platform: 'binary_sensor',
@@ -439,11 +431,12 @@ export default class Device extends AABBDevice {
         this.publishProperty('initial_time', isOff ? 0 : rec[INITIAL_HOUR_OFFSET] * 60 + rec[INITIAL_MIN_OFFSET])
         this.publishProperty('soil', SOIL[rec[SOIL_OFFSET]] ?? 'unknown')
         this.publishProperty('temp', TEMP[rec[TEMP_OFFSET]] ?? 'unknown')
-        // Extra Rinse is one number, 0..3 — the count of extra rinses the user added, straight off rec[4]
-        // (0x0E none .. 0x11 +3). rinse_count (rec[28]) is the TOTAL including course-built-in rinses, so it
-        // can exceed the extra count (e.g. Towels = 3 total with 0 extra); kept as a diagnostic, not the headline.
-        this.publishProperty('extra_rinse', Math.max(0, Math.min(3, rec[RINSE_OFFSET] - 0x0e)))
-        this.publishProperty('rinse_count', rec[RINSE_COUNT_OFFSET])
+        // Extra rinses the user added, off rec[4] (0x0E none .. 0x11 +3), split into a flag + a 0..3 count to
+        // match the sibling's shape. (rec[28] holds the TOTAL rinse count including a course's built-in rinses;
+        // not published — the added count is what the panel's Extra Rinse button controls.)
+        const extraRinses = Math.max(0, Math.min(3, rec[RINSE_OFFSET] - 0x0e))
+        this.publishProperty('extra_rinse', extraRinses > 0 ? 'ON' : 'OFF')
+        this.publishProperty('extra_rinse_count', extraRinses)
         this.publishProperty('cold_wash', (rec[OPTS35_OFFSET] & OPT35_COLD_WASH) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('turbo_wash', (rec[OPTS35_OFFSET] & OPT35_TURBO_WASH) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('pre_wash', (rec[OPTS35_OFFSET] & OPT35_PRE_WASH) !== 0 ? 'ON' : 'OFF')
@@ -453,9 +446,10 @@ export default class Device extends AABBDevice {
         this.publishProperty('signal', (rec[SIGNAL_OFFSET] & SIGNAL_BIT) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('door_lock', (rec[OPTS38_OFFSET] & OPT38_DOOR_LOCK) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('child_lock', (rec[OPTS38_OFFSET] & OPT38_CHILD_LOCK) !== 0 ? 'ON' : 'OFF')
-        // door sensor REMOVED: rec[38] bit 0x40 does not track the door — it read "open" while the door was
-        // shut and even while locked (physically impossible). Needs a clean open-vs-closed capture pair to ever
-        // restore; LG's own app omits a door tile for this model, likely for the same unreliability.
+        // No door-position entity by design. The machine emits a frame only on a STATE change, never on the door
+        // itself opening or closing, so any door sensor would sit stale and read wrong — and an unreliable door
+        // state is a tempting thing to automate on, which makes it a trap. Only the door LOCK (above) is
+        // frame-backed and reliable. (LG's own app shows no door tile for this model either.)
         this.publishProperty('spin', SPIN[rec[SPIN_OFFSET]] ?? 'unknown')
         this.publishProperty('cycles', rec[CYCLES_OFFSET])
         this.publishProperty('energy', rec[ENERGY_OFFSET])
