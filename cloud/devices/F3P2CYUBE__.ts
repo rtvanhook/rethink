@@ -185,6 +185,27 @@ const COURSE: Record<number, string> = {
     0xff: 'Downloaded Course',
 }
 
+// name -> course code, for the remote config/start command (speaks the exact codes the decoder reads).
+const COURSE_REV: Record<string, number> = Object.fromEntries(
+    Object.entries(COURSE).map(([code, name]) => [name, Number(code)]),
+)
+// Dial courses offered for a remote start. Excludes 'None' and the 0xFF Downloaded slot (that's a separate
+// WMDownload op — storing a SmartCourse into the slot — which is out of scope here).
+const START_COURSE_OPTIONS = [
+    'Normal',
+    'Heavy Duty',
+    'Towels',
+    'Perm. Press',
+    'Delicates',
+    'Bedding',
+    'Bright Whites',
+    'Allergiene',
+    'Sanitary',
+    'Speed Wash',
+    'Tub Clean',
+    'Spin Only',
+]
+
 export default class Device extends AABBDevice {
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq)
@@ -397,6 +418,27 @@ export default class Device extends AABBDevice {
                         name: 'Resume',
                         icon: 'mdi:play-pause',
                     },
+                    power_off: {
+                        platform: 'button',
+                        unique_id: '$deviceid-power_off',
+                        command_topic: '$this/power_off/set',
+                        payload_press: '',
+                        name: 'Power Off',
+                        icon: 'mdi:power',
+                        // The app guards this with "Are you sure?"; in HA that confirmation is a dashboard-card
+                        // property (tap_action: confirmation:), not an entity one — so this is a plain button and
+                        // the guard is added on the Lovelace card. See setProperty for the stranding caveat.
+                    },
+                    start_course: {
+                        platform: 'select',
+                        unique_id: '$deviceid-start_course',
+                        command_topic: '$this/start_course/set',
+                        options: START_COURSE_OPTIONS,
+                        name: 'Start course',
+                        icon: 'mdi:play-box-outline',
+                        // Optimistic (no state_topic): picking a course fires the config/start command for that
+                        // course at its defaults. Requires "Remote Start" armed on the machine, like all writes.
+                    },
                     spin: {
                         platform: 'sensor',
                         unique_id: '$deviceid-spin',
@@ -502,13 +544,32 @@ export default class Device extends AABBDevice {
         else if (prop === 'pause') this.send(Buffer.from('f0e5000201ff010302', 'hex'))
         else if (prop === 'resume')
             this.send(Buffer.from('f0e5000201ff0244000303', 'hex')) // resume-from-pause: a DISTINCT, longer packet than start
-        else if (prop === 'power' && value === 'OFF') {
-            // WMOff. WARNING: remote power-off drops the appliance's Wi-Fi module and there is NO reliable
-            // remote wake afterward — you strand the connection and must walk to the machine. The LG app warns
-            // about this too. Exposed for completeness; do not automate.
+        else if (prop === 'power_off') {
+            // WMOff — the app's Power Off button. The app guards it with "Are you sure?"; in HA that confirmation is
+            // a dashboard-card property (tap_action: confirmation:), not an entity one, so the guard is added on the
+            // Lovelace card. (LG's own HA integration ships an UNGUARDED power control that will strand the machine
+            // on a fat-finger — this is the same command, done with the guard restored where HA puts it.)
+            // Caveat, documented not withheld: remote power-off drops the Wi-Fi module with no reliable remote wake,
+            // stranding the connection until someone walks to the machine — exactly as the app warns.
             this.send(Buffer.from('f0e5000201ff010200', 'hex'))
+        } else if (prop === 'start_course') {
+            // config/start: start the picked course at its defaults (course-only, per scope). Like all writes, it
+            // needs "Remote Start" armed on the machine or the appliance beeps and ignores it.
+            const course = COURSE_REV[value]
+            if (course !== undefined) this.send(this.buildConfigStart(course))
         }
-        // Not captured/implemented: power ON (WMWakeup — moot after a remote off), and WMDownload (select a full
-        // cycle remotely) which packs course/soil/spin/temp/reserve/freshCare into one blob at start.
+        // Out of scope (grammar known, not built): the full per-field cycle builder (temp/soil/spin/rinse/pre-wash/
+        // cold/steam/freshCare/delay overrides — see buildConfigStart); power ON (WMWakeup, moot after a remote off);
+        // and WMDownload (store a SmartCourse into the 0xFF Downloaded slot — a different command entirely).
+    }
+
+    // Build the config/start command for a course at its defaults. Grammar reverse-engineered + confirmed against
+    // captured app frames:  f0 e5 00 02 01 ff [0x03 + #override-pairs] 0a [course] {[fieldId][value]}... 7f
+    // [delayHi delayLo] 03 01.  Course-only here: no override pairs (sub 0x03), delay 0 (0x0000 = start now); the
+    // AABB frame + outer checksum are added by send(). Field-pair ids for the full builder (later): temp 0x1f,
+    // soil 0x1e, spin 0x21, rinse 0x20, preWash 0x34, coldWash 0x38, steam 0x3e, freshCare 0x44 (turbo 0x35 the
+    // machine refuses — it is course-determined).
+    private buildConfigStart(course: number): Buffer {
+        return Buffer.from([0xf0, 0xe5, 0x00, 0x02, 0x01, 0xff, 0x03, 0x0a, course, 0x7f, 0x00, 0x00, 0x03, 0x01])
     }
 }

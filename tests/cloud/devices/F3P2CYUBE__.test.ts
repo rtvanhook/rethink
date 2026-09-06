@@ -386,10 +386,10 @@ describe('F3P2CYUBE__', () => {
         assert.equal(p.extra_rinse_count, 3)
     })
 
-    test('write: power OFF emits the exact captured WMOff packet', () => {
+    test('write: the power_off button emits the exact captured WMOff packet', () => {
         const { thinq, dev } = makeDevice()
         thinq.resetRecorder()
-        dev.setProperty('power', 'OFF')
+        dev.setProperty('power_off', '')
         // exact cloud->device packet captured via bridge mode when Power Off was pressed in the LG app
         assert.equal(hex(thinq.outbox[0]).toLowerCase(), 'aa0df0e5000201ff010200c4bb')
     })
@@ -404,6 +404,19 @@ describe('F3P2CYUBE__', () => {
             thinq.resetRecorder()
             dev.setProperty(prop, '')
             assert.equal(hex(thinq.outbox[0]).toLowerCase(), want, prop)
+        }
+    })
+
+    test('write: start_course builds the config/start command (course + defaults, start now)', () => {
+        const { thinq, dev } = makeDevice()
+        // grammar: f0e5000201ff [03=sub, no override pairs] 0a [course] 7f 0000 [start now] 0301 ; +AABB checksum
+        for (const [course, want] of [
+            ['Normal', 'aa12f0e5000201ff030a2e7f0000030104bb'],
+            ['Heavy Duty', 'aa12f0e5000201ff030a237f0000030113bb'],
+        ] as const) {
+            thinq.resetRecorder()
+            dev.setProperty('start_course', course)
+            assert.equal(hex(thinq.outbox[0]).toLowerCase(), want, course)
         }
     })
 })
