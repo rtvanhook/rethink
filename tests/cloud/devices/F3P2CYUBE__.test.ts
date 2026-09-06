@@ -160,16 +160,6 @@ const SIGNAL_ON = buf(
     'aa6020ec002b0003100e0f2e00000000000000002e002e00000000010073000000011e0000000000200000000000010000002b0003100e0f2e00000000000000002e002e00000000010073000000011e040000000020000000000001000019bb',
 )
 
-// Remote Start armed = rec[38] bit 0x40. Pinned by a same-machine diff (two selecting frames, remote start off
-// vs on): the ONLY flag-byte change is rec[38] 0x10 -> 0x50. Door lock (0x10) is set in both (door locked while
-// selecting). This is the bit once mistaken for a "door closed" sensor — there is no door sensor.
-const REMOTE_START_OFF = buf(
-    'aa6020ec002b0003100e0f2e0000000000003c001d001d00000000070373030000011e0400000000200000100080010000002b0003100e0f2e0000000000003b001d001d00000000070373030000011e0400000000200000100080010000eebb',
-)
-const REMOTE_START_ON = buf(
-    'aa6020ec002b0003100e0f2e00000000000000001d001d00000000020773030000011e0400000000200000400000010000002b0003100e0f2e00000000000000001d001d00000000020773030000011e0400000000200000500000010000e7bb',
-)
-
 function makeDevice() {
     const ha = new MockHAConnection()
     const thinq = new MockThinq2Device(DEVICE_ID, META)
@@ -238,17 +228,6 @@ describe('F3P2CYUBE__', () => {
         assert.equal(p.signal, 'OFF')
         thinq.emit('data', SIGNAL_ON)
         assert.equal(p.signal, 'ON')
-    })
-
-    test('remote start armed on rec[38] bit 0x40 (0x10 door-lock -> 0x50), off vs on', () => {
-        const { ha, thinq } = makeDevice()
-        thinq.emit('data', REMOTE_START_OFF)
-        const p = ha.devices[DEVICE_ID].properties
-        assert.equal(p.remote_start, 'OFF')
-        assert.equal(p.door_lock, 'ON') // door is locked while selecting, remote start or not
-        thinq.emit('data', REMOTE_START_ON)
-        assert.equal(p.remote_start, 'ON')
-        assert.equal(p.door_lock, 'ON')
     })
 
     test('running: state, previous state, countdown and total', () => {

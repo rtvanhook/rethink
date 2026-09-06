@@ -98,11 +98,9 @@ const OPT37_FRESH_CARE = 0x40 // pinned live: rec[37] 0x00->0x40 with cloud fres
 const OPTS38_OFFSET = 38
 const OPT38_DOOR_LOCK = 0x10
 const OPT38_CHILD_LOCK = 0x20 // pinned live: rec[38] 0x40->0x60 with cloud childLock ON (this model DOES expose it in-frame, unlike the F3L2CYU__ sibling)
-const OPT38_REMOTE_START = 0x40 // rec[38] bit 0x40 = REMOTE START armed. Pinned by a same-machine diff: two
-// selecting frames, remote start OFF vs ON, differed by EXACTLY this bit (rec[38] 0x10 -> 0x50). This is the bit
-// earlier mistaken for a "door closed" sensor — there is NO door sensor; that mislabel is why "door" read
-// nonsensically (open while shut/locked). A manual delay start locks the door (0x10 set) with 0x40 CLEAR,
-// confirming 0x40 is remote-start, not the lock.
+// rec[38] bit 0x40 was thought to be a door-closed sensor but it is NOT: it read "open" with the door shut and
+// even while the door was locked (impossible). No door entity is published; needs a clean open-vs-closed
+// capture pair to identify the real bit (if any). LG's own app shows no door tile for this model.
 
 const STATE_OFF = 0x00
 
@@ -358,13 +356,6 @@ export default class Device extends AABBDevice {
                         name: 'Child lock',
                         icon: 'mdi:account-lock',
                     },
-                    remote_start: {
-                        platform: 'binary_sensor',
-                        unique_id: '$deviceid-remote_start',
-                        state_topic: '$this/remote_start',
-                        name: 'Remote Start',
-                        icon: 'mdi:cellphone-wireless',
-                    },
                     start: {
                         platform: 'button',
                         unique_id: '$deviceid-start',
@@ -462,8 +453,9 @@ export default class Device extends AABBDevice {
         this.publishProperty('signal', (rec[SIGNAL_OFFSET] & SIGNAL_BIT) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('door_lock', (rec[OPTS38_OFFSET] & OPT38_DOOR_LOCK) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('child_lock', (rec[OPTS38_OFFSET] & OPT38_CHILD_LOCK) !== 0 ? 'ON' : 'OFF')
-        this.publishProperty('remote_start', (rec[OPTS38_OFFSET] & OPT38_REMOTE_START) !== 0 ? 'ON' : 'OFF')
-        // No door sensor: rec[38] 0x40 is remote-start (above), not the door; nothing else in the frame tracks it.
+        // door sensor REMOVED: rec[38] bit 0x40 does not track the door — it read "open" while the door was
+        // shut and even while locked (physically impossible). Needs a clean open-vs-closed capture pair to ever
+        // restore; LG's own app omits a door tile for this model, likely for the same unreliability.
         this.publishProperty('spin', SPIN[rec[SPIN_OFFSET]] ?? 'unknown')
         this.publishProperty('cycles', rec[CYCLES_OFFSET])
         this.publishProperty('energy', rec[ENERGY_OFFSET])
