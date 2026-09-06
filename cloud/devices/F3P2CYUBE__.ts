@@ -205,6 +205,7 @@ const START_COURSE_OPTIONS = [
     'Tub Clean',
     'Spin Only',
 ]
+const DELAY_MAX_HOURS = 19 // the app's delay-start ceiling
 
 export default class Device extends AABBDevice {
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
@@ -430,7 +431,23 @@ export default class Device extends AABBDevice {
                         name: 'Start course',
                         icon: 'mdi:play-box-outline',
                         // Optimistic (no state_topic): picking a course fires the config/start command for that
-                        // course at its defaults. Requires "Remote Start" armed on the machine, like all writes.
+                        // course at its defaults, folding in the current Delay start value. Requires "Remote Start".
+                    },
+                    delay: {
+                        platform: 'number',
+                        unique_id: '$deviceid-delay',
+                        command_topic: '$this/delay/set',
+                        state_topic: '$this/delay',
+                        min: 0,
+                        max: DELAY_MAX_HOURS,
+                        step: 1,
+                        mode: 'box',
+                        unit_of_measurement: 'h',
+                        name: 'Delay start',
+                        icon: 'mdi:clock-plus-outline',
+                        // Hours folded into the next start_course blob (0 = start now). The one cycle variable that
+                        // is NOT course-constrained, so it is safe to expose without per-course option logic. Also
+                        // doubles as the test hold: set 1, a course pick queues a 1h-delayed cycle you can cancel.
                     },
                     spin: {
                         platform: 'sensor',
@@ -516,6 +533,7 @@ export default class Device extends AABBDevice {
         this.publishProperty('spin', SPIN[rec[SPIN_OFFSET]] ?? 'unknown')
         this.publishProperty('cycles', rec[CYCLES_OFFSET])
         this.publishProperty('energy', rec[ENERGY_OFFSET])
+        this.publishProperty('delay', this.delayMinutes / 60) // reflect the write-side delay setting so the number shows it
     }
 
     // ---- write path (control) ----
@@ -560,10 +578,15 @@ export default class Device extends AABBDevice {
                 this.publishProperty('power_off', 'unknown') // reset the dropdown so it can't sit armed and is re-fireable
             }
         } else if (prop === 'start_course') {
-            // config/start: start the picked course at its defaults (course-only, per scope). Like all writes, it
-            // needs "Remote Start" armed on the machine or the appliance beeps and ignores it.
+            // config/start: start the picked course at its defaults, folding in the current delay (course-only, per
+            // scope). Like all writes, needs "Remote Start" armed or the appliance beeps and ignores it.
             const course = COURSE_REV[value]
             if (course !== undefined) this.send(this.buildConfigStart(course))
+        } else if (prop === 'delay') {
+            // hours of delay-start for the next start_course. Not sent on its own — it rides in the start blob.
+            const h = Math.max(0, Math.min(DELAY_MAX_HOURS, Math.round(Number(value) || 0)))
+            this.delayMinutes = h * 60
+            this.publishProperty('delay', h)
         }
         // Out of scope (grammar known, not built): the full per-field cycle builder (temp/soil/spin/rinse/pre-wash/
         // cold/steam/freshCare/delay overrides — see buildConfigStart); power ON (WMWakeup, moot after a remote off);
@@ -576,7 +599,26 @@ export default class Device extends AABBDevice {
     // AABB frame + outer checksum are added by send(). Field-pair ids for the full builder (later): temp 0x1f,
     // soil 0x1e, spin 0x21, rinse 0x20, preWash 0x34, coldWash 0x38, steam 0x3e, freshCare 0x44 (turbo 0x35 the
     // machine refuses — it is course-determined).
+    // Hours-of-delay (as minutes) folded into the next start_course blob; set by the `delay` number entity. 0 = now.
+    private delayMinutes = 0
+
     private buildConfigStart(course: number): Buffer {
-        return Buffer.from([0xf0, 0xe5, 0x00, 0x02, 0x01, 0xff, 0x03, 0x0a, course, 0x7f, 0x00, 0x00, 0x03, 0x01])
+        const d = this.delayMinutes
+        return Buffer.from([
+            0xf0,
+            0xe5,
+            0x00,
+            0x02,
+            0x01,
+            0xff,
+            0x03,
+            0x0a,
+            course,
+            0x7f,
+            (d >> 8) & 0xff,
+            d & 0xff,
+            0x03,
+            0x01,
+        ])
     }
 }

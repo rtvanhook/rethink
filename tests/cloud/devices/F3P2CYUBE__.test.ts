@@ -418,4 +418,13 @@ describe('F3P2CYUBE__', () => {
             assert.equal(hex(thinq.outbox[0]).toLowerCase(), want, course)
         }
     })
+
+    test('write: the delay value folds into the start_course blob (matches the captured 1h-delay frames)', () => {
+        const { thinq, dev } = makeDevice()
+        dev.setProperty('delay', '1') // 1 hour -> 0x003c minutes in the blob
+        thinq.resetRecorder()
+        dev.setProperty('start_course', 'Normal')
+        // byte-identical to the real captured app frame for Normal @ 1-hour delay
+        assert.equal(hex(thinq.outbox[0]).toLowerCase(), 'aa12f0e5000201ff030a2e7f003c0301d8bb')
+    })
 })
