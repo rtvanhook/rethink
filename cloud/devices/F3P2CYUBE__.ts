@@ -38,11 +38,12 @@ import AABBDevice from './aabb_device'
 //   rec[35]  bit 0x04 cold wash, 0x20 turbo wash (course-locked on some courses), 0x40 pre-wash
 //   rec[36]  bit 0x10 steam, 0x20 Rinse+Spin subcycle (temp & soil report null while it is active)
 //   rec[37]  bit 0x40 FreshCare
-//   rec[38]  bit 0x10 door lock, 0x20 child lock, 0x40 a door-latch state bit (see the door note in processStatus)
+//   rec[38]  bit 0x10 remote start (drives the annunciator lamp), 0x20 child lock, 0x40 unmapped
 //
 // Examined and left unmapped (not user-facing features): rec[21] single-frame transient; rec[25] phase-progress
-// sub-byte, redundant with state; rec[41] powered-on/settings-active flag. This frame carries no door-POSITION
-// sensor and no remote-start bit (see the door note in processStatus). Error codes not yet observed.
+// sub-byte, redundant with state; rec[41] powered-on/settings-active flag. This frame carries no door signal at
+// all — neither door position nor the physical door lock (see the note in processStatus). Error codes not yet
+// observed.
 
 const STATUS_FRAME_TYPE = 0xec
 const STATUS_FRAME_LEN = 92 // 3B header + 45B record A + 44B record B
@@ -81,9 +82,10 @@ const OPT35_COLD_WASH = 0x04
 const OPT35_TURBO_WASH = 0x20
 const OPT35_PRE_WASH = 0x40 // pinned live: rec[35] 0x20->0x60 with cloud preWash ON
 // rec[36] bit 0x10 = steam, bit 0x20 = Rinse+Spin subcycle (temp/soil null while active). rec[37] bit 0x40 = FreshCare.
-// rec[38] bit 0x10 = DOOR LOCK — set whenever the door is locked: a running cycle, an armed delay, or an armed
-// remote start (which pre-locks the door so it can start unattended). This frame carries no remote-start-specific
-// bit; "remote start armed" is indistinguishable from any other locked state, so we publish only the lock.
+// rec[38] bit 0x10 = REMOTE START (LG's remoteStart field): ON while the machine is running or armed to run
+// unattended, by ANY start method (panel, delay/timer, or a remote arm). It drives the panel's remote/annunciator
+// lamp and can be toggled off from the panel mid-run. It is NOT the door lock — it clears with the door still
+// physically locked. The physical door lock is not reliably observable in this frame (nor shown in LG's app).
 const OPTS36_OFFSET = 36
 const OPT36_STEAM = 0x10
 const OPT36_RINSE_SPIN = 0x20 // pinned live: rec[36] bit 0x20 = Rinse+Spin subcycle active (a modifier on the
@@ -91,10 +93,10 @@ const OPT36_RINSE_SPIN = 0x20 // pinned live: rec[36] bit 0x20 = Rinse+Spin subc
 const OPTS37_OFFSET = 37
 const OPT37_FRESH_CARE = 0x40 // pinned live: rec[37] 0x00->0x40 with cloud freshCare ON
 const OPTS38_OFFSET = 38
-const OPT38_DOOR_LOCK = 0x10
+const OPT38_REMOTE_START = 0x10
 const OPT38_CHILD_LOCK = 0x20 // child lock; confirmed against the cloud's childLock (this model exposes it in-frame, unlike the sibling)
-// rec[38] bit 0x40 is a door-latch STATE bit (set when the door is closed-but-unlocked, cleared when locked or
-// open), NOT a reliable door-position sensor — see the door note in processStatus. Not published.
+// rec[38] bit 0x40: unmapped. It moves but tracks neither remote start (0x10) nor child lock (0x20) reliably,
+// and it is not a trustworthy door signal. Not published.
 
 const STATE_OFF = 0x00
 
@@ -332,14 +334,12 @@ export default class Device extends AABBDevice {
                         name: 'Signal',
                         icon: 'mdi:bell',
                     },
-                    door_lock: {
+                    remote_start: {
                         platform: 'binary_sensor',
-                        unique_id: '$deviceid-door_lock',
-                        state_topic: '$this/door_lock',
-                        name: 'Door lock',
-                        icon: 'mdi:lock',
-                        // No device_class: we publish ON = locked, but HA's 'lock' class means ON = UNLOCKED, so
-                        // it would invert. Plain On/Off with the lock icon reads correctly (On = locked).
+                        unique_id: '$deviceid-remote_start',
+                        state_topic: '$this/remote_start',
+                        name: 'Remote Start',
+                        icon: 'mdi:cellphone-wireless',
                     },
                     child_lock: {
                         platform: 'binary_sensor',
@@ -444,12 +444,12 @@ export default class Device extends AABBDevice {
         this.publishProperty('rinse_spin', (rec[OPTS36_OFFSET] & OPT36_RINSE_SPIN) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('fresh_care', (rec[OPTS37_OFFSET] & OPT37_FRESH_CARE) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('signal', (rec[SIGNAL_OFFSET] & SIGNAL_BIT) !== 0 ? 'ON' : 'OFF')
-        this.publishProperty('door_lock', (rec[OPTS38_OFFSET] & OPT38_DOOR_LOCK) !== 0 ? 'ON' : 'OFF')
+        this.publishProperty('remote_start', (rec[OPTS38_OFFSET] & OPT38_REMOTE_START) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('child_lock', (rec[OPTS38_OFFSET] & OPT38_CHILD_LOCK) !== 0 ? 'ON' : 'OFF')
-        // No door-position entity by design. The machine emits a frame only on a STATE change, never on the door
-        // itself opening or closing, so any door sensor would sit stale and read wrong — and an unreliable door
-        // state is a tempting thing to automate on, which makes it a trap. Only the door LOCK (above) is
-        // frame-backed and reliable. (LG's own app shows no door tile for this model either.)
+        // No door entity at all — neither position nor lock. The machine frames only on a STATE change, never on
+        // the door opening/closing, so a door-position sensor would sit stale (a tempting, dangerous thing to
+        // automate on). And rec[38] 0x10, once mistaken for the door lock, is actually remote start (above) — it
+        // clears with the door still locked. LG's app shows no door tile either; the physical lock isn't in-frame.
         this.publishProperty('spin', SPIN[rec[SPIN_OFFSET]] ?? 'unknown')
         this.publishProperty('cycles', rec[CYCLES_OFFSET])
         this.publishProperty('energy', rec[ENERGY_OFFSET])

@@ -276,28 +276,28 @@ describe('F3P2CYUBE__', () => {
         assert.equal(p.turbo_wash, 'OFF')
     })
 
-    test('steam (rec[36] 0x10), pre-wash (rec[35] 0x40) and door lock (rec[38] 0x10, engaged by remote-start arm)', () => {
+    test('steam (rec[36] 0x10), pre-wash (rec[35] 0x40) and remote start (rec[38] 0x10)', () => {
         const { ha, thinq } = makeDevice()
         const p = ha.devices[DEVICE_ID].properties
         thinq.emit('data', STEAM_ON)
         assert.equal(p.steam, 'ON')
         assert.equal(p.pre_wash, 'OFF')
-        assert.equal(p.door_lock, 'OFF')
+        assert.equal(p.remote_start, 'OFF')
         thinq.emit('data', PREWASH_ON)
         assert.equal(p.pre_wash, 'ON')
         assert.equal(p.steam, 'OFF')
         assert.equal(p.turbo_wash, 'ON') // Normal locks turbo on: bit 0x20 stays set alongside pre-wash's 0x40
-        thinq.emit('data', REMOTE_ON) // remote start armed -> door pre-locks
-        assert.equal(p.door_lock, 'ON')
+        thinq.emit('data', REMOTE_ON) // remote start armed
+        assert.equal(p.remote_start, 'ON')
         assert.equal(p.pre_wash, 'OFF')
     })
 
-    test('child lock toggles on rec[38] bit 0x20, independent of the door-lock bit 0x10', () => {
+    test('child lock toggles on rec[38] bit 0x20, independent of the remote-start bit 0x10', () => {
         const { ha, thinq } = makeDevice()
         const p = ha.devices[DEVICE_ID].properties
         thinq.emit('data', CHILD_LOCK_ON)
         assert.equal(p.child_lock, 'ON')
-        assert.equal(p.door_lock, 'OFF') // 0x10 clear; 0x20 (child) and 0x10 (door) are separate bits
+        assert.equal(p.remote_start, 'OFF') // 0x10 clear; 0x20 (child) and 0x10 (remote start) are separate bits
         thinq.emit('data', CHILD_LOCK_OFF)
         assert.equal(p.child_lock, 'OFF')
     })
