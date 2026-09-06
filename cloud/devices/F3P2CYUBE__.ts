@@ -43,9 +43,9 @@ import AABBDevice from './aabb_device'
 //   rec[41]  bit 0x01 AI DD badge (AIDDLed) — course-linked (on for Normal & Bright Whites)
 //
 // Examined and left unmapped (not user-facing features): rec[21] single-frame transient; rec[25] phase-progress
-// sub-byte, redundant with state. Door POSITION is carried (rec[38] 0x40 = doorClose, published as `door`); the
-// physical door LOCK is NOT in-frame and not in LG's MonitoringValue (its app shows no lock tile either). Error
-// codes not yet observed.
+// sub-byte, redundant with state. Door POSITION is carried (rec[38] 0x40 = doorClose) but NOT published: the module
+// frames only on a STATE change, never on the door, so it would sit stale. The physical door LOCK is NOT in-frame
+// and not in LG's MonitoringValue (its app shows no lock tile either). Error codes not yet observed.
 
 const STATUS_FRAME_TYPE = 0xec
 const STATUS_FRAME_LEN = 92 // 3B header + 45B record A + 44B record B
@@ -97,10 +97,10 @@ const OPT37_FRESH_CARE = 0x40 // pinned live: rec[37] 0x00->0x40 with cloud fres
 const OPTS38_OFFSET = 38
 const OPT38_REMOTE_START = 0x10
 const OPT38_CHILD_LOCK = 0x20 // child lock; confirmed against the cloud's childLock (this model exposes it in-frame, unlike the sibling)
-const OPT38_DOOR_OPEN = 0x40 // door OPEN/closed (LG's doorClose/initialBit, a MonitoringValue). CONFIRMED live against
-// labeled frames: 0x00 closed -> 0x40 open, independent of remote_start (0x10) and child_lock (0x20). This is door
-// POSITION, not the lock — the physical door LOCK is not in-frame (LG never puts it in MonitoringValue). Caveat: the
-// module frames on STATE changes, so this can lag an open/close by a frame; it is a position report, not an interlock.
+// rec[38] bit 0x40 = door OPEN/closed (LG's doorClose/initialBit, a MonitoringValue). CONFIRMED live against labeled
+// frames: 0x00 closed -> 0x40 open, independent of remote_start (0x10) and child_lock (0x20). Door POSITION, not the
+// lock. NOT published: the module frames only on STATE changes, never on the door, so the value sits stale (reads
+// "open" after the door is shut). The physical door LOCK is not in-frame (LG never puts it in MonitoringValue).
 const OPT38_ADD_ITEM = 0x80 // Add Item annunciator (LG's addGarment). CONFIRMED live: set for the whole Add-Item
 // episode (which pauses, drains, and unlocks); a PLAIN pause clears remote_start WITHOUT setting this bit, which is
 // what distinguishes it. Cleared on resume.
@@ -358,14 +358,6 @@ export default class Device extends AABBDevice {
                         name: 'Child lock',
                         icon: 'mdi:account-lock',
                     },
-                    door: {
-                        platform: 'binary_sensor',
-                        unique_id: '$deviceid-door',
-                        state_topic: '$this/door',
-                        name: 'Door',
-                        device_class: 'door', // ON = open. Door POSITION (LG's doorClose), not the lock.
-                        icon: 'mdi:door',
-                    },
                     add_item: {
                         platform: 'binary_sensor',
                         unique_id: '$deviceid-add_item',
@@ -404,14 +396,6 @@ export default class Device extends AABBDevice {
                         payload_press: '',
                         name: 'Resume',
                         icon: 'mdi:play-pause',
-                    },
-                    stop: {
-                        platform: 'button',
-                        unique_id: '$deviceid-stop',
-                        command_topic: '$this/stop/set',
-                        payload_press: '',
-                        name: 'Stop',
-                        icon: 'mdi:stop-circle-outline',
                     },
                     spin: {
                         platform: 'sensor',
@@ -487,9 +471,10 @@ export default class Device extends AABBDevice {
         this.publishProperty('signal', (rec[SIGNAL_OFFSET] & SIGNAL_BIT) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('remote_start', (rec[OPTS38_OFFSET] & OPT38_REMOTE_START) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('child_lock', (rec[OPTS38_OFFSET] & OPT38_CHILD_LOCK) !== 0 ? 'ON' : 'OFF')
-        // Door POSITION (open/closed) — LG's doorClose. ON = open. NOT the physical lock, which is not in-frame and
-        // not in LG's MonitoringValue (see OPT38_DOOR_OPEN). rec[38] 0x10, once mistaken for the lock, is remote start.
-        this.publishProperty('door', (rec[OPTS38_OFFSET] & OPT38_DOOR_OPEN) !== 0 ? 'ON' : 'OFF')
+        // rec[38] 0x40 = door POSITION (LG's doorClose) — decoded and understood, but deliberately NOT published:
+        // the module frames only on a STATE change, never on the door itself, so a door sensor sits stale (reads
+        // "open" long after the door is shut, untouched). LG monitors doorClose but its app shows no door tile, same
+        // reason. rec[38] 0x10, once mistaken for the lock, is remote start; the physical door LOCK is not in-frame.
         this.publishProperty('add_item', (rec[OPTS38_OFFSET] & OPT38_ADD_ITEM) !== 0 ? 'ON' : 'OFF')
         // AI DD badge (LG's AIDDLed): course-linked, mirrored from the cloud (see AIDDLED_OFFSET).
         this.publishProperty('ai_dd', (rec[AIDDLED_OFFSET] & AIDDLED_BIT) !== 0 ? 'ON' : 'OFF')
@@ -517,11 +502,6 @@ export default class Device extends AABBDevice {
         else if (prop === 'pause') this.send(Buffer.from('f0e5000201ff010302', 'hex'))
         else if (prop === 'resume')
             this.send(Buffer.from('f0e5000201ff0244000303', 'hex')) // resume-from-pause: a DISTINCT, longer packet than start
-        else if (prop === 'stop')
-            // LG's WMStop operation. Per the modelJson, WMStop's controlDataType is PAUSE: LG's remote "stop" IS a
-            // pause — there is no remote cycle-cancel, only pause / power-off / start. Same packet as pause, exposed
-            // under LG's start/stop/power_off operation name.
-            this.send(Buffer.from('f0e5000201ff010302', 'hex'))
         else if (prop === 'power' && value === 'OFF') {
             // WMOff. WARNING: remote power-off drops the appliance's Wi-Fi module and there is NO reliable
             // remote wake afterward — you strand the connection and must walk to the machine. The LG app warns
