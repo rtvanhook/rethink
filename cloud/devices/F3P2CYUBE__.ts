@@ -36,7 +36,9 @@ import AABBDevice from './aabb_device'
 //                            filled in by observation (see COURSE). 0x2E is the course of the first capture.
 //   rec[14:16] remainTime    hour, minute — CONFIRMED (cloud remainTimeMinute 17 -> 16 -> 15 -> 14 tracked byte 15)
 //   rec[16:18] initialTime   hour, minute — CONFIRMED (0x28 = the 40-minute total HA reported for the cycle)
-//   rec[19]  courseSpendPower CONFIRMED (cloud 48, 51, 61, 62 tracked byte 19 exactly); unit not documented
+//   rec[19]  courseSpendPower — byte 19 tracks the cloud's value, but its unit/meaning is undocumented and
+//            uncracked (no LG docs, no app tile, no one online has decoded it). Decoded here for the record but
+//            NOT published: a unitless number of unknown provenance is more likely a synthetic index than real Wh.
 //   rec[22]  state           CONFIRMED (0x0B Running while HA said running, 0x0C Rinsing while HA said rinsing)
 //   rec[23]  preState        CONFIRMED by the same transitions (0x03 Detecting -> 0x0B Running -> 0x0C Rinsing)
 //   rec[28]  rinse count     enum-consistent (2 with extra rinse on, 1 after cloud reported rinseCount RINSE_1)
@@ -68,7 +70,6 @@ const INITIAL_HOUR_OFFSET = 16
 const INITIAL_MIN_OFFSET = 17
 const RESERVE_HI_OFFSET = 12 // reserve (delay-wash) minutes, 16-bit big-endian at rec[12:14]; 0 unless armed
 const RESERVE_LO_OFFSET = 13
-const ENERGY_OFFSET = 19
 const STATE_OFFSET = 22
 const PRESTATE_OFFSET = 23
 const RINSE_COUNT_OFFSET = 28 // TOTAL rinses (1=default .. 4=+3 extra); diagnostic. Extra Rinse is derived from
@@ -396,15 +397,6 @@ export default class Device extends AABBDevice {
                         state_class: 'total',
                         entity_category: 'diagnostic',
                     },
-                    energy: {
-                        platform: 'sensor',
-                        unique_id: '$deviceid-energy',
-                        state_topic: '$this/energy',
-                        name: 'Course energy',
-                        icon: 'mdi:lightning-bolt',
-                        state_class: 'measurement',
-                        // the cloud calls this courseSpendPower and gives it no unit; published raw
-                    },
                 },
             }),
         )
@@ -458,7 +450,6 @@ export default class Device extends AABBDevice {
         // restore; LG's own app omits a door tile for this model, likely for the same unreliability.
         this.publishProperty('spin', SPIN[rec[SPIN_OFFSET]] ?? 'unknown')
         this.publishProperty('cycles', rec[CYCLES_OFFSET])
-        this.publishProperty('energy', rec[ENERGY_OFFSET])
     }
 
     // ---- write path (control) ----
