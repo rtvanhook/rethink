@@ -412,6 +412,7 @@ describe('F3P2CYUBE__', () => {
         for (const [course, want] of [
             ['Normal', 'aa12f0e5000201ff030a2e7f0000030104bb'],
             ['Heavy Duty', 'aa12f0e5000201ff030a237f0000030113bb'],
+            ['Downloaded Course', 'aa12f0e5000201ff030aff7f0000030177bb'], // 0xFF = run the Downloaded slot
         ] as const) {
             thinq.resetRecorder()
             dev.setProperty('start_course', course)

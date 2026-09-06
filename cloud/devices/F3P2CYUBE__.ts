@@ -189,8 +189,9 @@ const COURSE: Record<number, string> = {
 const COURSE_REV: Record<string, number> = Object.fromEntries(
     Object.entries(COURSE).map(([code, name]) => [name, Number(code)]),
 )
-// Dial courses offered for a remote start. Excludes 'None' and the 0xFF Downloaded slot (that's a separate
-// WMDownload op — storing a SmartCourse into the slot — which is out of scope here).
+// The 13 dial positions offered for a remote start (excludes only 'None'). 'Downloaded Course' (0xFF) starts
+// whatever is currently in the Downloaded slot — the RUN half of the specialty flow (download a SmartCourse into
+// the slot, then start it here). A bare config/start on 0xFF runs the slot's current course.
 const START_COURSE_OPTIONS = [
     'Normal',
     'Heavy Duty',
@@ -204,6 +205,7 @@ const START_COURSE_OPTIONS = [
     'Speed Wash',
     'Tub Clean',
     'Spin Only',
+    'Downloaded Course',
 ]
 const DELAY_MAX_HOURS = 19 // the app's delay-start ceiling
 
