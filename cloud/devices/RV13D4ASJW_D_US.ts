@@ -127,7 +127,7 @@ const COURSE = Enum.of({
     'Heavy Duty': 0x01,
     Towels: 0x02,
     Normal: 0x03,
-    'Perm Press': 0x04,
+    'Perm. Press': 0x04, // printed with the period on the dial
     Delicates: 0x05,
     Bedding: 0x07,
     // Base courses that are NOT dial positions: each appears in the record after the app downloads the smart
@@ -298,7 +298,7 @@ const COURSE_DEFAULTS: Record<string, { temp: number; dryLevel: number; energySa
     Towels: { temp: 4, dryLevel: 3 },
     Normal: { temp: 4, dryLevel: 3, energySaver: true },
     Delicates: { temp: 2, dryLevel: 3 },
-    'Perm Press': { temp: 3, dryLevel: 3 },
+    'Perm. Press': { temp: 3, dryLevel: 3 },
     Bedding: { temp: 3, dryLevel: 3 },
     Antibacterial: { temp: 5, dryLevel: 5 },
     'Speed Dry': { temp: 5, dryLevel: 0 },
@@ -573,7 +573,7 @@ export default class Device extends AABBDevice {
                         platform: 'binary_sensor',
                         unique_id: '$deviceid-turbo_steam',
                         state_topic: '$this/turbo_steam',
-                        name: 'Turbo Steam',
+                        name: 'TurboSteam', // one word on the panel
                         icon: 'mdi:kettle-steam',
                     },
                     wrinkle_care: {
