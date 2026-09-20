@@ -402,28 +402,40 @@ export default class Device extends AABBDevice {
                         entity_category: 'diagnostic',
                     },
                     dry_level: {
-                        platform: 'sensor',
+                        platform: 'select',
                         unique_id: '$deviceid-dry_level',
                         state_topic: '$this/dry_level',
+                        command_topic: '$this/dry_level/set',
+                        options: ['None', ...DRY_LEVEL.options],
                         name: 'Dry level',
                         icon: 'mdi:water-percent',
+                        // Reads the panel's setting; while PAUSED, picking a value sends the app's resume-apply packet with
+                        // the dry level changed (same mechanism as Wrinkle Care). Not editable remotely otherwise.
                     },
                     temp: {
-                        platform: 'sensor',
+                        platform: 'select',
                         unique_id: '$deviceid-temp',
                         state_topic: '$this/temp',
+                        command_topic: '$this/temp/set',
+                        options: ['None', ...TEMP.options],
                         name: 'Temperature',
                         icon: 'mdi:thermometer',
+                        // Reads the panel's setting; while PAUSED, picking a value sends resume-apply with the temperature changed.
                     },
                     more_less_time: {
-                        platform: 'sensor',
+                        platform: 'number',
                         unique_id: '$deviceid-more_less_time',
                         state_topic: '$this/more_less_time',
+                        command_topic: '$this/more_less_time/set',
+                        min: -30,
+                        max: 30,
+                        step: 5,
                         name: 'More/Less time',
                         icon: 'mdi:plus-minus-variant',
                         device_class: 'duration',
                         unit_of_measurement: 'min',
-                        entity_category: 'diagnostic',
+                        // Signed minutes against the course default (panel More Time / Less Time). While PAUSED, setting it
+                        // sends resume-apply with the trim changed.
                     },
                     remote_start: {
                         platform: 'binary_sensor',
@@ -450,11 +462,14 @@ export default class Device extends AABBDevice {
                         entity_category: 'diagnostic',
                     },
                     time_dry: {
-                        platform: 'sensor',
+                        platform: 'select',
                         unique_id: '$deviceid-time_dry',
                         state_topic: '$this/time_dry',
+                        command_topic: '$this/time_dry/set',
+                        options: ['None', ...TIME_DRY.options],
                         name: 'Time Dry duration',
                         icon: 'mdi:timer-sand',
+                        // Time Dry only. While PAUSED on Time Dry, picking a duration sends resume-apply with the selector changed.
                     },
                     ai: {
                         platform: 'binary_sensor',
@@ -637,6 +652,47 @@ export default class Device extends AABBDevice {
                     rec,
                     flags,
                     START_OPTS_BASE | ((rec[OPT2_OFFSET] & OPT2_ENERGY_SAVER) !== 0 ? START_OPTS_ENERGY_SAVER : 0),
+                ),
+            )
+            return
+        }
+        if (prop === 'dry_level' || prop === 'temp' || prop === 'time_dry' || prop === 'more_less_time') {
+            const rec = this.lastRecord
+            if (!rec) return
+            if (rec[PHASE_OFFSET] !== PHASE_PAUSED) {
+                // not editable remotely unless paused: reflect the real state back so the control does not lie
+                this.publishProperty('dry_level', DRY_LEVEL.map(rec[DRY_LEVEL_OFFSET]))
+                this.publishProperty('temp', TEMP.map(rec[TEMP_OFFSET]))
+                this.publishProperty(
+                    'time_dry',
+                    rec[COURSE_OFFSET] === 0x12 ? TIME_DRY.map(rec[TIME_DRY_OFFSET]) : 'None',
+                )
+                this.publishProperty('more_less_time', rec.readInt8(MORE_LESS_TIME_OFFSET))
+                return
+            }
+            const edit = Buffer.from(rec)
+            if (prop === 'dry_level') {
+                const v = DRY_LEVEL.unmap(value)
+                if (v === undefined) return
+                edit[DRY_LEVEL_OFFSET] = v
+            } else if (prop === 'temp') {
+                const v = TEMP.unmap(value)
+                if (v === undefined) return
+                edit[TEMP_OFFSET] = v
+            } else if (prop === 'time_dry') {
+                const v = TIME_DRY.unmap(value)
+                if (v === undefined || rec[COURSE_OFFSET] !== 0x12) return
+                edit[TIME_DRY_OFFSET] = v
+            } else {
+                const m = Math.round(Number(value))
+                if (!Number.isFinite(m)) return
+                edit.writeInt8(Math.max(-30, Math.min(30, m)), MORE_LESS_TIME_OFFSET)
+            }
+            this.send(
+                this.startPacketFromRecord(
+                    edit,
+                    edit[FLAGS_OFFSET] & ~FLAG_PANEL_ACTIVE & 0xff,
+                    START_OPTS_BASE | ((edit[OPT2_OFFSET] & OPT2_ENERGY_SAVER) !== 0 ? START_OPTS_ENERGY_SAVER : 0),
                 ),
             )
             return

@@ -374,4 +374,22 @@ describe('RV13D4ASJW_D_US', () => {
         assert.deepEqual(thinq.outbox, [])
         assert.equal(ha.devices[DEVICE_ID].properties.wrinkle_care, 'OFF')
     })
+    test('dry level, temperature and More/Less edits while paused are resume-apply packets with one byte changed', () => {
+        const { thinq, dev } = makeDevice()
+        thinq.emit('data', PAUSED_TOWELS)
+        dev.setProperty('dry_level', 'More')
+        dev.setProperty('temp', 'Low')
+        dev.setProperty('more_less_time', '10')
+        dev.setProperty('time_dry', '50 min') // not on Time Dry: refused, nothing sent
+        const sent = thinq.outbox.map((b) => b.subarray(2, -2)) // inner bytes
+        assert.equal(sent.length, 3)
+        for (const p of sent) {
+            assert.equal(p[1], 0x26)
+            assert.equal(p[2], 0x02) // Towels, from the record
+            assert.equal(p[10], 0x01) // resume-apply: new-cycle bit clear
+        }
+        assert.equal(sent[0][17], 4) // dry level More
+        assert.equal(sent[1][5], 2) // temp Low
+        assert.equal(sent[2][19], 10) // More/Less +10
+    })
 })
