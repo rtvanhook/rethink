@@ -13,6 +13,7 @@ type StartRequest = {
     minutes?: number
     more_less_time?: number
     wrinkle_care?: boolean
+    reduce_static?: boolean
     energy_saver?: boolean
 }
 
@@ -290,9 +291,10 @@ const SPECIALTY_DOWNLOAD: Record<string, string> = {
 //   Normal, defaults:            f026 03 0000 04 0000 00 00 43 00 03 00000000 03 00 00 000000   (Energy Saver on by default -> verb 0x43)
 //   Normal + Wrinkle Care:       f026 03 0000 04 0000 00 10 43 00 03 00000000 03 00 00 000000   (Wrinkle Care = flags 0x10, the rec[15] bit)
 //   Time Dry 38 min, Medium:     f026 12 0000 03 0000 03 00 41 00 12 00000000 00 00 fe 000000   (duration 40 + More/Less -2)
+//   Heavy Duty + Reduce Static:  f026 01 0000 05 0000 00 02 41 00 01 00000000 03 05 00 000000   (flags 0x02 AND load-item code 5 at offset 18)
 // Per-course defaults come from the model JSON's Course table and match what the panel showed for every dial
-// position captured. Reduce Static (flags 0x02) and Damp Dry Signal (0x08) are NOT written: neither has
-// been seen in a captured start (the app does not offer Damp Dry remotely), so they stay at the course default.
+// position captured. Damp Dry Signal (0x08) is NOT written: no captured start carries it (the app does not offer it
+// remotely), so it stays at the course default.
 const COURSE_DEFAULTS: Record<string, { temp: number; dryLevel: number; energySaver?: boolean; timeDry?: number }> = {
     'Heavy Duty': { temp: 5, dryLevel: 3 },
     Towels: { temp: 4, dryLevel: 3 },
@@ -656,7 +658,7 @@ export default class Device extends AABBDevice {
                 0,
                 0,
                 rec[DRY_LEVEL_OFFSET],
-                0,
+                rec[LOAD_ITEM_OFFSET], // the app carries the current load-item code here (captured with Reduce Static on)
                 rec[MORE_LESS_TIME_OFFSET],
                 0,
                 0,
@@ -699,7 +701,11 @@ export default class Device extends AABBDevice {
             timeDry = sel
             moreLess = m - TIME_DRY_MINUTES[sel]
         }
-        const flags = (smart?.flags ?? 0) | (req.wrinkle_care ? FLAG_WRINKLE_CARE : 0)
+        const flags =
+            (smart?.flags ?? 0) |
+            (req.wrinkle_care ? FLAG_WRINKLE_CARE : 0) |
+            (req.reduce_static ? FLAG_REDUCE_STATIC : 0)
+        const loadItem = req.reduce_static ? 5 : (smart?.loadItem ?? 0) // Reduce Static engages load-item code 5 on the panel and in the app's start
         const energySaver = req.energy_saver ?? def.energySaver ?? false
         const opts = START_OPTS_BASE | START_OPTS_NEW_CYCLE | (energySaver ? START_OPTS_ENERGY_SAVER : 0)
         return Buffer.from([
@@ -720,7 +726,7 @@ export default class Device extends AABBDevice {
             0,
             0,
             dryLevel,
-            smart?.loadItem ?? 0,
+            loadItem,
             moreLess & 0xff,
             0,
             0,

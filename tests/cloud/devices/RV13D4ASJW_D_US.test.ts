@@ -132,6 +132,14 @@ const DENIM_DOWNLOADED = buf(
 // The app's start of the downloaded Denim smart course, 2026-09-19: base course 0x0a with 0x65 at offset 11.
 const DENIM_START_HEX = 'aa1bf0260a0000030000000041000a650000000300dd0000002dbb'
 
+// Heavy Duty with Reduce Static pressed at the panel (rec[15] 0x02, load-item code 5), Remote Start armed — the
+// record the app's start at 22:22:53 was issued against.
+const ARMED_HEAVY_DUTY_REDUCE_STATIC = buf(
+    'aa4030ec001b010034003401000305000400000042a80000000000000565000000001b010034003401000305000400000042a9000000000000056500000084bb',
+)
+// That start, as the app sent it: flags 0x02 and the load-item code 5 at offset 18.
+const HEAVY_DUTY_REDUCE_STATIC_START_HEX = 'aa1bf02601000005000000024100010000000003050000000078bb'
+
 function makeDevice() {
     const ha = new MockHAConnection()
     const thinq = new MockThinq2Device(DEVICE_ID, META)
@@ -332,6 +340,16 @@ describe('RV13D4ASJW_D_US', () => {
         assert.deepEqual(
             thinq.outbox.map((b) => b.toString('hex')),
             [DENIM_START_HEX],
+        )
+    })
+    test('start-as-dialed carries Reduce Static and the load-item code the way the app does', () => {
+        const { thinq, dev } = makeDevice()
+        thinq.emit('data', ARMED_HEAVY_DUTY_REDUCE_STATIC)
+        dev.setProperty('start', '')
+        dev.setProperty('start_json', JSON.stringify({ course: 'Heavy Duty', reduce_static: true }))
+        assert.deepEqual(
+            thinq.outbox.map((b) => b.toString('hex')),
+            [HEAVY_DUTY_REDUCE_STATIC_START_HEX, HEAVY_DUTY_REDUCE_STATIC_START_HEX],
         )
     })
 })
