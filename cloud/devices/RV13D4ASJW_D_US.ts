@@ -305,6 +305,37 @@ const COURSE_DEFAULTS: Record<string, { temp: number; dryLevel: number; energySa
     'Time Dry': { temp: 5, dryLevel: 0, timeDry: 3 },
 }
 const START_COURSES = Object.keys(COURSE_DEFAULTS)
+// A smart course starts as its BASE course with the SmartCourse code at packet offset 11 — the same slot the
+// download carries it in. Captured 2026-09-19: the app's start of the downloaded Denim was
+//   f026 0a 0000 03 0000 00 00 41 00 0a 65 000000 03 00 dd 000000   (Khaki/Jean base, Medium, Normal dry, code 0x65, More/Less -35)
+// Base course, temp, dry level and Time Dry selector for each smart course are read off its captured download
+// frame (body[0], body[3], body[15], body[6]) rather than typed twice.
+function smartCourseDefaults(name: string):
+    | {
+          course: number
+          temp: number
+          dryLevel: number
+          timeDry: number
+          smart: number
+          flags: number
+          loadItem: number
+          moreLess: number
+      }
+    | undefined {
+    const dl = SPECIALTY_DOWNLOAD[name]
+    if (!dl) return undefined
+    const b = Buffer.from(dl.slice(8), 'hex') // after f0 25 03 15
+    return {
+        course: b[0],
+        temp: b[3],
+        timeDry: b[6],
+        flags: b[7],
+        smart: b[11],
+        dryLevel: b[15],
+        loadItem: b[16],
+        moreLess: b.readInt8(17),
+    }
+}
 const TIME_DRY_MINUTES: Record<number, number> = { 1: 20, 2: 30, 3: 40, 4: 50, 5: 60 }
 
 const CMD_START = [0xf0, 0x26]
@@ -479,7 +510,7 @@ export default class Device extends AABBDevice {
                         unique_id: '$deviceid-start_course',
                         command_topic: '$this/start_course/set',
                         state_topic: '$this/start_course',
-                        options: ['unknown', ...START_COURSES],
+                        options: ['unknown', ...START_COURSES, ...Object.keys(SPECIALTY_DOWNLOAD)],
                         name: 'Start course (defaults)',
                         icon: 'mdi:play-circle-outline',
                         // Starts the picked dial course at its model-JSON defaults, regardless of the dial. For a course
@@ -645,14 +676,17 @@ export default class Device extends AABBDevice {
     // More/Less trim, e.g. 38 -> 40 with -2), more_less_time (minutes, signed), wrinkle_care, energy_saver.
     // Returns null for an unknown course or an unmappable value rather than sending a guess.
     private buildCourseStart(req: StartRequest): Buffer | null {
-        const def = COURSE_DEFAULTS[req.course]
-        const course = COURSE.unmap(req.course)
+        const smart = smartCourseDefaults(req.course)
+        const def = smart
+            ? { temp: smart.temp, dryLevel: smart.dryLevel, timeDry: smart.timeDry || undefined, energySaver: false }
+            : COURSE_DEFAULTS[req.course]
+        const course = smart ? smart.course : COURSE.unmap(req.course)
         if (!def || course === undefined) return null
         const temp = req.temp !== undefined ? TEMP.unmap(req.temp) : def.temp
         const dryLevel = req.dry_level !== undefined ? DRY_LEVEL.unmap(req.dry_level) : def.dryLevel
         if (temp === undefined || dryLevel === undefined) return null
         let timeDry = def.timeDry ?? 0
-        let moreLess = Math.round(req.more_less_time ?? 0)
+        let moreLess = Math.round(req.more_less_time ?? smart?.moreLess ?? 0)
         if (req.minutes !== undefined) {
             if (course !== 0x12) return null // minutes only mean something on Time Dry
             const m = Math.round(req.minutes)
@@ -661,7 +695,7 @@ export default class Device extends AABBDevice {
             timeDry = sel
             moreLess = m - TIME_DRY_MINUTES[sel]
         }
-        const flags = req.wrinkle_care ? FLAG_WRINKLE_CARE : 0
+        const flags = (smart?.flags ?? 0) | (req.wrinkle_care ? FLAG_WRINKLE_CARE : 0)
         const energySaver = req.energy_saver ?? def.energySaver ?? false
         const opts = START_OPTS_BASE | START_OPTS_NEW_CYCLE | (energySaver ? START_OPTS_ENERGY_SAVER : 0)
         return Buffer.from([
@@ -677,12 +711,12 @@ export default class Device extends AABBDevice {
             opts,
             0,
             course,
-            0,
+            smart?.smart ?? 0,
             0,
             0,
             0,
             dryLevel,
-            0,
+            smart?.loadItem ?? 0,
             moreLess & 0xff,
             0,
             0,

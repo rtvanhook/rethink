@@ -129,6 +129,9 @@ const DENIM_DOWNLOADED = buf(
     'aa4030ec001b01001e001e12000005020400000000290000000000000064000000001b01002300230a00030300040000000029000000006500006500000024bb',
 )
 
+// The app's start of the downloaded Denim smart course, 2026-09-19: base course 0x0a with 0x65 at offset 11.
+const DENIM_START_HEX = 'aa1bf0260a0000030000000041000a650000000300dd0000002dbb'
+
 function makeDevice() {
     const ha = new MockHAConnection()
     const thinq = new MockThinq2Device(DEVICE_ID, META)
@@ -320,6 +323,15 @@ describe('RV13D4ASJW_D_US', () => {
                 'aa1bf0261200000300000300410012000000000000fe00000011bb',
                 'aa1bf0260300000400000000430003000000000300000000007ebb',
             ],
+        )
+    })
+    test('a smart course starts as its base course with the code at offset 11 (the captured Denim start)', () => {
+        const { thinq, dev } = makeDevice()
+        thinq.emit('data', ARMED_NORMAL)
+        dev.setProperty('start_json', JSON.stringify({ course: 'Denim', more_less_time: -35 }))
+        assert.deepEqual(
+            thinq.outbox.map((b) => b.toString('hex')),
+            [DENIM_START_HEX],
         )
     })
 })
