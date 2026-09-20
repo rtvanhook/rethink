@@ -23,6 +23,8 @@ import F3L2CYU__ from './devices/F3L2CYU__'
 import F3L7CYK5W_US_WIFI from './devices/F3L7CYK5W_US_WIFI'
 import RV13B6BSD_D_US_WIFI from './devices/RV13B6BSD_D_US_WIFI'
 import RV13B6ES_D_US_WIFI from './devices/RV13B6ES_D_US_WIFI'
+import F3P2CYUBE__ from './devices/F3P2CYUBE__'
+import RV13D4ASJW_D_US from './devices/RV13D4ASJW_D_US'
 import WTL_FXU_BDV_NA_01 from './devices/WTL_FXU_BDV_NA_01'
 import DHUM_056905_WW from './devices/DHUM_056905_WW'
 import ST_B_E4H01Y_APL from './devices/ST_B_E4H01Y_APL'
@@ -75,6 +77,8 @@ const t2deviceTypes: Record<string, T2Factory> = {
     ['RV13B6BSD_D_US_WIFI']: RV13B6BSD_D_US_WIFI, // LG electric dryer
     ['RV13B6ES_D_US_WIFI']: RV13B6ES_D_US_WIFI, // LG electric dryer, same frame layout as RV13B6BSD but
     // Wrinkle Care sits in a different bitfield, so it needs its own handler rather than an alias
+    ['F3P2CYUBE__']: F3P2CYUBE__, // LG WM4000HWA front-load washer
+    ['RV13D4ASJW_D_US']: RV13D4ASJW_D_US, // LG DLEX4000W electric dryer
     WTL_FXU_BDV_NA_01, // LG WashTower
     DHUM_056905_WW,
     ST_B_E4H01Y_APL,
