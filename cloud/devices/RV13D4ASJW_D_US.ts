@@ -579,11 +579,17 @@ export default class Device extends AABBDevice {
                         icon: 'mdi:kettle-steam',
                     },
                     wrinkle_care: {
-                        platform: 'binary_sensor',
+                        platform: 'switch',
                         unique_id: '$deviceid-wrinkle_care',
                         state_topic: '$this/wrinkle_care',
+                        command_topic: '$this/wrinkle_care/set',
                         name: 'Wrinkle Care',
-                        icon: 'mdi:tshirt-crew-outline',
+                        icon: 'mdi:iron-outline',
+                        // A control, as in the LG app: while the dryer is PAUSED, switching it sends the app's resume-apply
+                        // packet (the start packet with the new-cycle bit clear and the flag changed) and the cycle resumes
+                        // with Wrinkle Care as set — captured 2026-09-19 22:24:47. At any other time the dryer accepts no
+                        // remote edit, so the switch snaps back to the panel's actual state; use start_json's wrinkle_care
+                        // to start a cycle with it on.
                     },
                 },
             }),
@@ -615,6 +621,26 @@ export default class Device extends AABBDevice {
             }
             return
         }
+        if (prop === 'wrinkle_care') {
+            const rec = this.lastRecord
+            if (!rec) return
+            const on = value === 'ON'
+            if (rec[PHASE_OFFSET] !== PHASE_PAUSED) {
+                // not editable remotely unless paused: reflect the real state back so HA's switch does not lie
+                this.publishProperty('wrinkle_care', (rec[FLAGS_OFFSET] & FLAG_WRINKLE_CARE) !== 0 ? 'ON' : 'OFF')
+                return
+            }
+            const flags =
+                (rec[FLAGS_OFFSET] & ~FLAG_PANEL_ACTIVE & ~FLAG_WRINKLE_CARE & 0xff) | (on ? FLAG_WRINKLE_CARE : 0)
+            this.send(
+                this.startPacketFromRecord(
+                    rec,
+                    flags,
+                    START_OPTS_BASE | ((rec[OPT2_OFFSET] & OPT2_ENERGY_SAVER) !== 0 ? START_OPTS_ENERGY_SAVER : 0),
+                ),
+            )
+            return
+        }
         if (prop === 'specialty') {
             const dl = SPECIALTY_DOWNLOAD[value]
             if (dl !== undefined) {
@@ -639,32 +665,36 @@ export default class Device extends AABBDevice {
             START_OPTS_BASE |
             (rec[PHASE_OFFSET] === PHASE_PAUSED ? 0 : START_OPTS_NEW_CYCLE) |
             ((rec[OPT2_OFFSET] & OPT2_ENERGY_SAVER) !== 0 ? START_OPTS_ENERGY_SAVER : 0)
-        this.send(
-            Buffer.from([
-                ...CMD_START,
-                rec[COURSE_OFFSET],
-                0,
-                0,
-                rec[TEMP_OFFSET],
-                0,
-                0,
-                rec[COURSE_OFFSET] === 0x12 ? rec[TIME_DRY_OFFSET] : 0,
-                rec[FLAGS_OFFSET] & ~FLAG_PANEL_ACTIVE & 0xff,
-                opts,
-                0,
-                rec[COURSE_OFFSET],
-                0,
-                0,
-                0,
-                0,
-                rec[DRY_LEVEL_OFFSET],
-                rec[LOAD_ITEM_OFFSET], // the app carries the current load-item code here (captured with Reduce Static on)
-                rec[MORE_LESS_TIME_OFFSET],
-                0,
-                0,
-                0,
-            ]),
-        )
+        this.send(this.startPacketFromRecord(rec, rec[FLAGS_OFFSET] & ~FLAG_PANEL_ACTIVE & 0xff, opts))
+    }
+
+    // The start/resume packet built from the appliance's own record: what the panel has set, with the given
+    // flags byte and verb/options byte. The app sends exactly this shape for a start and for a resume-apply.
+    private startPacketFromRecord(rec: Buffer, flags: number, opts: number): Buffer {
+        return Buffer.from([
+            ...CMD_START,
+            rec[COURSE_OFFSET],
+            0,
+            0,
+            rec[TEMP_OFFSET],
+            0,
+            0,
+            rec[COURSE_OFFSET] === 0x12 ? rec[TIME_DRY_OFFSET] : 0,
+            flags,
+            opts,
+            0,
+            rec[COURSE_OFFSET],
+            0,
+            0,
+            0,
+            0,
+            rec[DRY_LEVEL_OFFSET],
+            rec[LOAD_ITEM_OFFSET], // the app carries the current load-item code here (captured with Reduce Static on)
+            rec[MORE_LESS_TIME_OFFSET],
+            0,
+            0,
+            0,
+        ])
     }
 
     private parseStartJson(value: string): StartRequest | null {

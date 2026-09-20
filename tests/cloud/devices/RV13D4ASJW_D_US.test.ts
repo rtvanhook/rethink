@@ -140,6 +140,13 @@ const ARMED_HEAVY_DUTY_REDUCE_STATIC = buf(
 // That start, as the app sent it: flags 0x02 and the load-item code 5 at offset 18.
 const HEAVY_DUTY_REDUCE_STATIC_START_HEX = 'aa1bf02601000005000000024100010000000003050000000078bb'
 
+// Paused (phase 0x03) on Towels with Remote Start armed, 2026-09-19 22:24:41 — the app then sent a resume-apply with
+// Wrinkle Care ON: the start packet, new-cycle bit clear, flags 0x10.
+const PAUSED_TOWELS = buf(
+    'aa4030ec001b320037003702000304000400000000a900001c0100000065000000001b030037003702000304000400000040a9000034320000006500000013bb',
+)
+const RESUME_APPLY_WRINKLE_CARE_HEX = 'aa1bf026020000040000001001000200000000030000000000a2bb'
+
 function makeDevice() {
     const ha = new MockHAConnection()
     const thinq = new MockThinq2Device(DEVICE_ID, META)
@@ -351,5 +358,20 @@ describe('RV13D4ASJW_D_US', () => {
             thinq.outbox.map((b) => b.toString('hex')),
             [HEAVY_DUTY_REDUCE_STATIC_START_HEX, HEAVY_DUTY_REDUCE_STATIC_START_HEX],
         )
+    })
+    test('Wrinkle Care switch while paused sends the resume-apply packet the app sent', () => {
+        const { ha, thinq, dev } = makeDevice()
+        thinq.emit('data', PAUSED_TOWELS)
+        dev.setProperty('wrinkle_care', 'ON')
+        assert.deepEqual(
+            thinq.outbox.map((b) => b.toString('hex')),
+            [RESUME_APPLY_WRINKLE_CARE_HEX],
+        )
+        // not paused: nothing is sent and the switch snaps back to the panel's state
+        thinq.resetRecorder()
+        thinq.emit('data', HEAVY_DUTY)
+        dev.setProperty('wrinkle_care', 'ON')
+        assert.deepEqual(thinq.outbox, [])
+        assert.equal(ha.devices[DEVICE_ID].properties.wrinkle_care, 'OFF')
     })
 })
