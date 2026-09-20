@@ -177,19 +177,19 @@ describe('RV13D4ASJW_D_US', () => {
     test('the Downloaded position reports the loaded smart course', () => {
         assert.equal(feed([DOWNLOADED_SUPER_DRY]).course, 'Super Dry')
     })
-    test('load item count lives in rec[23]', () => {
-        assert.equal(feed([STEAM_FRESH_LOAD_ITEM]).load_item, 2)
-        assert.equal(feed([REDUCE_STATIC_ON]).load_item, 5)
+    test('load items: the code in rec[23] maps to the item count the display shows', () => {
+        assert.equal(feed([STEAM_FRESH_LOAD_ITEM]).load_item, 9) // code 2 -> 9 items on the display
+        assert.equal(feed([REDUCE_STATIC_ON]).load_item, 16) // code 5 -> 16 items
         assert.equal(feed([HEAVY_DUTY]).load_item, 0)
     })
     test('rec[15] option bits', () => {
-        assert.equal(feed([CHILD_LOCK_ON]).child_lock, 'ON')
+        assert.equal(feed([CHILD_LOCK_ON]).control_lock, 'ON')
         assert.equal(feed([REDUCE_STATIC_ON]).reduce_static, 'ON')
         assert.equal(feed([DAMP_DRY_SIGNAL_ON]).damp_dry_signal, 'ON')
         assert.equal(feed([WRINKLE_CARE_ON]).wrinkle_care, 'ON')
         assert.equal(feed([WRINKLE_CARE_OFF]).wrinkle_care, 'OFF')
         const hd = feed([HEAVY_DUTY])
-        assert.equal(hd.child_lock, 'OFF')
+        assert.equal(hd.control_lock, 'OFF')
         assert.equal(hd.reduce_static, 'OFF')
         assert.equal(hd.damp_dry_signal, 'OFF')
         assert.equal(hd.wrinkle_care, 'OFF')

@@ -84,7 +84,7 @@ const MORE_LESS_TIME_OFFSET = 12
 // The 0x40 "base" bit is present while the panel is awake and clears on panel idle timeout and while
 // actively drying — it is not part of any single option, so it is not exposed as its own entity.
 const FLAGS_OFFSET = 15
-const FLAG_CHILD_LOCK = 0x01
+const FLAG_CONTROL_LOCK = 0x01 // the panel calls it Control Lock (hold Damp Dry Signal); the cloud field is childLock
 const FLAG_REDUCE_STATIC = 0x02
 const FLAG_DAMP_DRY_SIGNAL = 0x08
 // Confirmed across six clean on/off transitions, matching the cloud's wrinkleCare exactly, observed both
@@ -101,6 +101,9 @@ const OPT2_TURBO_STEAM = 0x04
 // rec[23]: literal count of "load items", matching the cloud's loadItem (LOADITEM_OFF/2/5 seen as
 // 0x00/0x02/0x05). Not decoded by RV13B6BSD_D_US_WIFI.
 const LOAD_ITEM_OFFSET = 23
+// The load-item code is a step index; the number of items the panel actually displays for each step (Tom read
+// them off the display): 1 -> 7, 2 -> 9, 3 -> 11, 4 -> 14, 5 -> 16, 6 -> 18. 0 = no load-item setting.
+const LOAD_ITEMS: Record<number, number> = { 1: 7, 2: 9, 3: 11, 4: 14, 5: 16, 6: 18 }
 
 const PHASE_OFF = 0x00
 
@@ -129,7 +132,7 @@ const COURSE = Enum.of({
     Bedding: 0x07,
     // Base courses that are NOT dial positions: each appears in the record after the app downloads the smart
     // course built on it (cloud courseDryer27inchBase names in the comments).
-    'Ultra Delicates': 0x06, // ULTRA_DELICATES
+    'Ultra Delicate': 0x06, // ULTRA_DELICATES
     'Small Load': 0x09, // SMALLLOAD
     'Khaki/Jean': 0x0a, // KHAKIJEAN (Denim)
     Sportswear: 0x0b, // SPORTWEAR (Gym Clothes)
@@ -212,7 +215,7 @@ const SMARTCOURSE = Enum.of({
     Denim: 0x65,
     'Kids Clothes': 0x66,
     'Small Load': 0x67,
-    'Ultra Delicates': 0x68,
+    'Ultra Delicate': 0x68,
     'Gym Clothes': 0x6b,
     Blankets: 0x6c,
     'Blanket Refresh': 0x6d,
@@ -248,7 +251,7 @@ const SPECIALTY_DOWNLOAD: Record<string, string> = {
     Denim: 'f02503150a0000030000000001000a65000000030000000000',
     'Kids Clothes': 'f02503150c0000050000000001000c66000000030000000000',
     'Small Load': 'f0250315090000050000000001000967000000030000000000',
-    'Ultra Delicates': 'f0250315060000010000000001000668000000030000000000',
+    'Ultra Delicate': 'f0250315060000010000000001000668000000030000000000',
     'Gym Clothes': 'f02503150b0000050000000001000b6b000000030000000000',
     Blankets: 'f02503150e0000030000000001000e6c000000050000000000',
     // Time Dry base (0x12) with the duration at body[6] and no dry level
@@ -550,11 +553,11 @@ export default class Device extends AABBDevice {
                         name: 'Damp Dry Signal',
                         icon: 'mdi:water-alert-outline',
                     },
-                    child_lock: {
+                    control_lock: {
                         platform: 'binary_sensor',
-                        unique_id: '$deviceid-child_lock',
-                        state_topic: '$this/child_lock',
-                        name: 'Child lock',
+                        unique_id: '$deviceid-control_lock',
+                        state_topic: '$this/control_lock',
+                        name: 'Control Lock',
                         icon: 'mdi:lock',
                         entity_category: 'diagnostic',
                     },
@@ -750,13 +753,13 @@ export default class Device extends AABBDevice {
         )
         this.publishProperty('dry_level', DRY_LEVEL.map(rec[DRY_LEVEL_OFFSET]))
         this.publishProperty('temp', TEMP.map(rec[TEMP_OFFSET]))
-        this.publishProperty('load_item', rec[LOAD_ITEM_OFFSET])
+        this.publishProperty('load_item', LOAD_ITEMS[rec[LOAD_ITEM_OFFSET]] ?? 0)
         this.publishProperty('signal', SIGNAL.map(rec[SIGNAL_OFFSET]))
         // signed: negative trims the course default, positive extends it
         this.publishProperty('more_less_time', isOff ? 0 : rec.readInt8(MORE_LESS_TIME_OFFSET))
 
         const flags = rec[FLAGS_OFFSET]
-        this.publishProperty('child_lock', (flags & FLAG_CHILD_LOCK) !== 0 ? 'ON' : 'OFF')
+        this.publishProperty('control_lock', (flags & FLAG_CONTROL_LOCK) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('reduce_static', (flags & FLAG_REDUCE_STATIC) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('damp_dry_signal', (flags & FLAG_DAMP_DRY_SIGNAL) !== 0 ? 'ON' : 'OFF')
         this.publishProperty('wrinkle_care', (flags & FLAG_WRINKLE_CARE) !== 0 ? 'ON' : 'OFF')
