@@ -213,13 +213,13 @@ const DOWNLOAD_COURSE_OFFSET = 24
 const SMARTCOURSE = Enum.of({
     'Super Dry': 0x64,
     Denim: 0x65,
-    'Kids Clothes': 0x66,
+    "Kids' Clothes": 0x66,
     'Small Load': 0x67,
     'Ultra Delicate': 0x68,
     'Gym Clothes': 0x6b,
     Blankets: 0x6c,
     'Blanket Refresh': 0x6d,
-    'Rainy Day': 0x6e,
+    'Rainy Days': 0x6e,
     Socks: 0x71,
     'Overnight Dry': 0x72,
     'Bedding / Curtains': 0x73,
@@ -249,14 +249,14 @@ const SMARTCOURSE = Enum.of({
 const SPECIALTY_DOWNLOAD: Record<string, string> = {
     'Super Dry': 'f02503151a0000050000000001001a64000000050000000000',
     Denim: 'f02503150a0000030000000001000a65000000030000000000',
-    'Kids Clothes': 'f02503150c0000050000000001000c66000000030000000000',
+    "Kids' Clothes": 'f02503150c0000050000000001000c66000000030000000000',
     'Small Load': 'f0250315090000050000000001000967000000030000000000',
     'Ultra Delicate': 'f0250315060000010000000001000668000000030000000000',
     'Gym Clothes': 'f02503150b0000050000000001000b6b000000030000000000',
     Blankets: 'f02503150e0000030000000001000e6c000000050000000000',
     // Time Dry base (0x12) with the duration at body[6] and no dry level
     'Blanket Refresh': 'f025031512000001000001000100126d000000000000000000',
-    'Rainy Day': 'f02503150d0000020000000001000d6e000000030000000000',
+    'Rainy Days': 'f02503150d0000020000000001000d6e000000030000000000',
     // Time Dry 30 with +5 More Time at body[17] — the only download carrying a More/Less trim
     Socks: 'f0250315120000050000020001001271000000000005000000',
     // Wrinkle Care ON rides in the flags byte at body[7] (0x10, the same bit as rec[15])
@@ -311,6 +311,7 @@ const START_COURSES = Object.keys(COURSE_DEFAULTS)
 // A smart course starts as its BASE course with the SmartCourse code at packet offset 11 — the same slot the
 // download carries it in. Captured 2026-09-19: the app's start of the downloaded Denim was
 //   f026 0a 0000 03 0000 00 00 41 00 0a 65 000000 03 00 dd 000000   (Khaki/Jean base, Medium, Normal dry, code 0x65, More/Less -35)
+// Names are the LG app's own (its Manage Downloads list, screenshots 2026-09-19), so the HA select reads like the app.
 // Base course, temp, dry level and Time Dry selector for each smart course are read off its captured download
 // frame (body[0], body[3], body[15], body[6]) rather than typed twice.
 function smartCourseDefaults(name: string):
