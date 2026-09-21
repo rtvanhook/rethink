@@ -159,6 +159,22 @@ function feed(frames: Buffer[]) {
     return ha.devices[DEVICE_ID].properties
 }
 
+// A vented Normal cycle with Wrinkle Care on, run to its end (2026-09-20). Cloud state:"COOLING", preState:"DRYING", remainTimeMinute:1.
+const COOLING = buf(
+    'aa4030ec001b320038003903000304000400000010ab0000040100000073000000001b330001000203000304000400000010ab00000632000000730000009fbb',
+)
+// Cloud state:"END", preState:"COOLING".
+const END = buf(
+    'aa4030ec001b330001000303000304000400000010ab0000083200000073000000001b040001000303000304000400000050aa00000a3300000073000000fcbb',
+)
+// 30 s after End the after-cycle tumble begins: cloud state:"WRINKLECARE", preState:"END".
+const WRINKLE_CARE_TUMBLE = buf(
+    'aa4030ec001b040001000303000304000400000050aa00000a3300000073000000001b380001000103000304000400000050ab00000a040000007300000095bb',
+)
+// The tumble ends by powering the appliance off (114 minutes later, untouched): Off with the previous phase 0x38. It never returns to End.
+const WRINKLE_CARE_FINISHED = buf(
+    'aa4030ec001b380001013703000304000400000010ab0000180400000073000000001b000001000100000000000400000040a80000183800000073000000e3bb',
+)
 describe('RV13D4ASJW_D_US', () => {
     test('0xEB single-record frame after power-on decodes with the 0xEC offsets', () => {
         const p = feed([EB_INITIAL_POWER_ON])
@@ -249,6 +265,24 @@ describe('RV13D4ASJW_D_US', () => {
         assert.equal(manual.energy_saver, 'OFF')
         assert.equal(manual.energy_saver_auto, 'OFF')
         assert.equal(manual.ai, 'ON')
+    })
+    test('a full cycle ends Cooling -> End -> Wrinkle Care tumble -> Off', () => {
+        const c = feed([COOLING])
+        assert.equal(c.status, 'Cooling')
+        assert.equal(c.previous_status, 'Drying')
+        assert.equal(c.remaining_time, 1)
+        const e = feed([END])
+        assert.equal(e.status, 'End')
+        assert.equal(e.previous_status, 'Cooling')
+        const w = feed([WRINKLE_CARE_TUMBLE])
+        assert.equal(w.status, 'Wrinkle Care')
+        assert.equal(w.previous_status, 'End')
+        assert.equal(w.wrinkle_care, 'ON')
+        assert.equal(w.power, 'ON')
+        const off = feed([WRINKLE_CARE_FINISHED])
+        assert.equal(off.status, 'Off')
+        assert.equal(off.previous_status, 'Wrinkle Care')
+        assert.equal(off.power, 'OFF')
     })
     test('phases through an app-driven start, pause, resume and power off', () => {
         const d = feed([DRYING])

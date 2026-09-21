@@ -38,10 +38,9 @@ type StartRequest = {
 // was being operated, clearing on its own — the two were not separated on this appliance, so it is left
 // undecoded rather than published as a light.
 //
-// Not decoded (declared entities intentionally omitted rather than published wrong): the Time Dry duration
-// selector (rec[10], one sample only), error codes, a door sensor (opening the door produced no distinct
-// byte), and the downloaded-course identity (rec[21] went 0x64 only while the Downloaded position was
-// selected; needs more than one downloaded course to pin).
+// Not decoded (declared entities intentionally omitted rather than published wrong): error codes (never
+// observed) and a door sensor (opening the door produced no distinct byte; a mid-cycle door opening is the
+// same generic Pause a button press gives).
 const STATUS_FRAME_TYPE = 0xec
 const STATUS_FRAME_LEN = 60 // 3B header + 29B record A (old) + 28B record B (current)
 const RECORD_B_OFFSET = 32
@@ -108,9 +107,13 @@ const LOAD_ITEMS: Record<number, number> = { 1: 7, 2: 9, 3: 11, 4: 14, 5: 16, 6:
 
 const PHASE_OFF = 0x00
 
-// Phase/status byte. Every value below was observed directly on this appliance across a full Speed Dry
-// run and cross-checked against the cloud's own state field (POWEROFF / INITIAL / PAUSE / DRYING /
-// COOLING / END). Anything outside this table falls back to 'Running' rather than being reported wrongly.
+// Phase/status byte. Every code was observed directly on this appliance and cross-checked against the
+// cloud's own state field in the same second (POWEROFF / INITIAL / PAUSE / DRYING / COOLING / END /
+// WRINKLECARE). With Wrinkle Care selected a cycle runs Drying -> Cooling -> End (about 30 s) -> Wrinkle
+// Care, the after-cycle tumble; End is brief in that case, so trigger on the transition, not on a dwell.
+// Left alone the tumble ran 114 minutes and ended by powering off (Wrinkle Care -> Off, never back to End);
+// while it runs the initial-time field counts elapsed minutes up and remaining time stays at 1.
+// Anything outside this table falls back to 'Running' rather than being reported wrongly.
 const STATUS = Enum.of({
     Off: 0x00,
     Initial: 0x01,
@@ -118,6 +121,7 @@ const STATUS = Enum.of({
     Drying: 0x32,
     Cooling: 0x33,
     End: 0x04,
+    'Wrinkle Care': 0x38,
 })
 
 // Course identifier -> name, derived from the capture by pairing rec[6] with the cloud's
@@ -245,8 +249,8 @@ const SMARTCOURSE = Enum.of({
 //   f02503150a0000030000000001000a65000000030000000000
 // It stores the cycle in the slot AND selects it (the record switched to course 0x0a with 0x65 in the slot
 // without the dial moving); the panel's Downloaded position then runs it. Like every write it needs
-// Remote Start armed. One entry per captured download; the rest of the model JSON's 17 are added as they
-// are captured — a generated frame with a guessed code is exactly the kind of write this project refuses.
+// Remote Start armed. Every entry is a captured frame — a generated frame with a guessed code is exactly
+// the kind of write this project refuses.
 const SPECIALTY_DOWNLOAD: Record<string, string> = {
     'Super Dry': 'f02503151a0000050000000001001a64000000050000000000',
     Denim: 'f02503150a0000030000000001000a65000000030000000000',
