@@ -171,8 +171,8 @@ const END = buf(
 const WRINKLE_CARE_TUMBLE = buf(
     'aa4030ec001b040001000303000304000400000050aa00000a3300000073000000001b380001000103000304000400000050ab00000a040000007300000095bb',
 )
-// The tumble ends by powering the appliance off (114 minutes later, untouched): Off with the previous phase 0x38. It never returns to End.
-const WRINKLE_CARE_FINISHED = buf(
+// Powered off by hand 114 minutes into the tumble: Off with the previous phase 0x38. (Its own ending was not observed.)
+const WRINKLE_CARE_POWERED_OFF = buf(
     'aa4030ec001b380001013703000304000400000010ab0000180400000073000000001b000001000100000000000400000040a80000183800000073000000e3bb',
 )
 describe('RV13D4ASJW_D_US', () => {
@@ -266,7 +266,7 @@ describe('RV13D4ASJW_D_US', () => {
         assert.equal(manual.energy_saver_auto, 'OFF')
         assert.equal(manual.ai, 'ON')
     })
-    test('a full cycle ends Cooling -> End -> Wrinkle Care tumble -> Off', () => {
+    test('a full cycle ends Cooling -> End -> Wrinkle Care tumble; power off from the tumble', () => {
         const c = feed([COOLING])
         assert.equal(c.status, 'Cooling')
         assert.equal(c.previous_status, 'Drying')
@@ -279,7 +279,7 @@ describe('RV13D4ASJW_D_US', () => {
         assert.equal(w.previous_status, 'End')
         assert.equal(w.wrinkle_care, 'ON')
         assert.equal(w.power, 'ON')
-        const off = feed([WRINKLE_CARE_FINISHED])
+        const off = feed([WRINKLE_CARE_POWERED_OFF])
         assert.equal(off.status, 'Off')
         assert.equal(off.previous_status, 'Wrinkle Care')
         assert.equal(off.power, 'OFF')

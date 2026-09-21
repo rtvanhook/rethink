@@ -111,8 +111,9 @@ const PHASE_OFF = 0x00
 // cloud's own state field in the same second (POWEROFF / INITIAL / PAUSE / DRYING / COOLING / END /
 // WRINKLECARE). With Wrinkle Care selected a cycle runs Drying -> Cooling -> End (about 30 s) -> Wrinkle
 // Care, the after-cycle tumble; End is brief in that case, so trigger on the transition, not on a dwell.
-// Left alone the tumble ran 114 minutes and ended by powering off (Wrinkle Care -> Off, never back to End);
-// while it runs the initial-time field counts elapsed minutes up and remaining time stays at 1.
+// While it runs the initial-time field counts elapsed minutes up and remaining time stays at 1. The tumble was
+// still running after 114 minutes when it was powered off by hand (Wrinkle Care -> Off); how it ends when left
+// alone has not been observed.
 // Anything outside this table falls back to 'Running' rather than being reported wrongly.
 const STATUS = Enum.of({
     Off: 0x00,
